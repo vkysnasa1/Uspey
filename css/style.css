@@ -190,3 +190,10 @@ textarea { min-height: 88px; resize: vertical; }
 .noscript { padding: 20px; text-align: center; }
 
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+/* мои адреса */
+.chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.pchip { min-height: 36px; padding: 6px 12px; border-radius: 999px; border: 1.5px solid var(--line); background: var(--card); color: var(--ink); font-weight: 700; font-size: 14px; cursor: pointer; }
+.pchip[aria-pressed=true] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.place input[type=radio] { width: 20px; height: 20px; accent-color: var(--ink); }
+details > summary::-webkit-details-marker { display: none; }

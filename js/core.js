@@ -403,6 +403,7 @@
     const where = bld ? bld.name.replace('Корпус', 'корпус') + ' (' + bld.addr + ')' : 'вуз';
     const aud = first.pair + ' пара: ' + (first.subject || 'занятие') + (first.room ? ', ауд. ' + first.room : '');
     Object.assign(base, { building: bld ? Object.assign({ key: bKey }, bld) : null });
+    const lbl = settings.originLabel, out = lbl && lbl !== 'Дом' ? 'Выйти (' + lbl + ')' : 'Выйти из дома';
 
     if (settings.mode === 'car') {
       const car = settings.car;
@@ -423,7 +424,7 @@
       return Object.assign(base, {
         status: 'ok', leave, routeKm: r ? r.km : car.routeKm, traffic: f, parking, margin,
         steps: [
-          { t: leave, text: 'Выйти из дома и сесть в машину' + (margin ? ' (запас на погрешность ' + margin + ' мин)' : '') },
+          { t: leave, text: out + ' и сесть в машину' + (margin ? ' (запас на погрешность ' + margin + ' мин)' : '') },
           { t: leave + margin + road, text: 'Подъехать: ' + where + ' — без пробок ' + drive + ' мин, сейчас ×' + String(f).replace('.', ',') + ' (' + trafficLabel(f) + ')' + (delay.minutes ? ', погода +' + delay.minutes : '') },
           { t: leave + margin + road + parking, text: 'Найти место и дойти до аудитории — ~' + parking + ' мин' },
           { t: first.start, text: aud },
@@ -437,7 +438,7 @@
     if (auto && auto.type === 'walk') {
       const leave = target - auto.ride - delay.minutes;
       return Object.assign(base, { status: 'ok', leave, auto, steps: [
-        { t: leave, text: 'Выйти из дома пешком' + (delay.minutes ? ' (с учётом погоды +' + delay.minutes + ' мин)' : '') },
+        { t: leave, text: out + ' пешком' + (delay.minutes ? ' (с учётом погоды +' + delay.minutes + ' мин)' : '') },
         { t: target, text: 'Дойти: ' + where },
         { t: first.start, text: aud },
       ] });
@@ -466,7 +467,7 @@
       status: 'ok', leave, bus: busT, walkToBuilding: toBld, auto, traffic: ft, margin,
       backup: prev == null ? null : { bus: prev, leave: prev - walkTo - reserve },
       steps: [
-        { t: leave, text: 'Выйти из дома' + (auto ? ', идти ' + walkTo + ' мин до остановки «' + auto.from + '»' : '') },
+        { t: leave, text: out + (auto ? ', идти ' + walkTo + ' мин до остановки «' + auto.from + '»' : '') },
         { t: busT, text: label + ' отходит' + (auto ? ' (' + auto.stops + ' ост.)' : ' от остановки') },
         { t: busT + ride, text: (auto ? 'Выйти на остановке «' + auto.to + '»' : 'Выйти у вуза') + (ft > 1.05 ? ', пробки ×' + String(ft).replace('.', ',') : '') + (delay.minutes ? ', погода +' + delay.minutes + ' мин' : '') },
         { t: busT + ride + toBld, text: 'Дойти: ' + where + (toBld ? ', пешком ' + toBld + ' мин' : '') + (margin ? '. В запасе ещё ' + margin + ' мин на погрешность' : '') },

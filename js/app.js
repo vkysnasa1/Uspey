@@ -18,7 +18,7 @@
       tulsu: null,
       settings: {
         proxy: '',
-        mode: 'bus', home: null, uni: Object.assign({}, UNI),
+        mode: 'bus', home: null, places: [], placeId: null, uni: Object.assign({}, UNI),
         earlyMin: 10, errorPct: 10, notifyMin: 10, notificationsOn: false,
         semesterStart: semesterDefault(),
         pairTimes: C.DEFAULT_PAIRS.map((p) => p.slice()),
@@ -38,6 +38,13 @@
         Object.assign(d.settings, st);
         d.settings.bus = Object.assign(defaults().settings.bus, st.bus);
         d.settings.car = Object.assign(defaults().settings.car, st.car);
+        if (!Array.isArray(d.settings.places)) d.settings.places = [];
+        if (d.settings.home && !d.settings.places.length) { // старые сохранения: один адрес → «Дом»
+          const id = 'p' + Date.now().toString(36);
+          d.settings.places.push({ id, label: 'Дом', name: d.settings.home.name, lat: d.settings.home.lat, lon: d.settings.home.lon });
+          d.settings.placeId = id;
+          d.settings.originLabel = 'Дом';
+        }
         if (st.car && st.car.parkingAuto === undefined) { d.settings.car.traffic = 'auto'; d.settings.car.parkingAuto = true; } // старые сохранения
         if (!Array.isArray(d.settings.pairTimes) || d.settings.pairTimes.length !== 6) d.settings.pairTimes = defaults().settings.pairTimes;
       }
@@ -150,6 +157,7 @@
     }
     const t = trips[0];
     ensureRoutes(trips);
+    const chips = placeChips(); if (chips) root.append(chips);
     root.append(hero(t, now));
     if (t.status === 'ok') root.append(stepsPanel(t));
     root.append(weatherPanel(t));
@@ -403,6 +411,102 @@
   }
 
   /* ---------- ДОРОГА ---------- */
+  /* ---- мои адреса: Дом, Работа, Общага… ---- */
+  const LABELS = ['Дом', 'Работа', 'Общежитие', 'Родители', 'Девушка', 'Друг'];
+  const curPlace = () => S.settings.places.find((x) => x.id === S.settings.placeId) || null;
+  // маршруты считаются отдельно для каждого адреса и запоминаются в нём
+  function stashCache() {
+    const pl = curPlace(), st = S.settings;
+    if (!pl) return;
+    pl.cache = { carRoutes: st.car.routes || {}, plans: st.bus.plans || {}, network: st.bus.network || null, routeMin: st.car.routeMin, routeKm: st.car.routeKm };
+  }
+  function selectPlace(id, silent) {
+    const st = S.settings, pl = st.places.find((x) => x.id === id);
+    if (!pl) return;
+    stashCache();
+    st.placeId = id;
+    st.home = { name: pl.name, lat: pl.lat, lon: pl.lon };
+    st.originLabel = pl.label;
+    const c = pl.cache || {};
+    st.car.routes = c.carRoutes || {}; st.car.routeMin = c.routeMin || null; st.car.routeKm = c.routeKm || null;
+    st.bus.plans = c.plans || {}; st.bus.network = c.network || null;
+    save();
+    if (!silent) toast('Едем: ' + pl.label);
+    loadWeather();
+    render();
+    scheduleNotifications();
+  }
+  function addPlace(label, r) {
+    const st = S.settings, name = String(label || '').trim() || 'Адрес ' + (st.places.length + 1);
+    const pl = { id: 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), label: name.slice(0, 30), name: r.name, lat: r.lat, lon: r.lon };
+    st.places.push(pl);
+    save();
+    selectPlace(pl.id, true);
+    toast('Сохранено: ' + pl.label);
+  }
+  function placeChips() {
+    const st = S.settings;
+    if (st.places.length < 2) return null;
+    return h('div', { class: 'chips', role: 'group', 'aria-label': 'Откуда еду' },
+      h('span', { class: 'small muted' }, 'Еду из:'),
+      st.places.map((pl) => h('button', { type: 'button', class: 'pchip', 'aria-pressed': String(pl.id === st.placeId), onclick: () => selectPlace(pl.id) }, pl.label)));
+  }
+  function placesPanel() {
+    const st = S.settings;
+    const box = h('div', { class: 'place' }, h('h3', null, 'Мои адреса'));
+    if (!st.places.length) box.append(h('p', { class: 'hint' }, 'Сохрани адрес и подпиши его — «Дом», «Работа», «Общежитие». Маршрут и время выхода считаются от выбранного.'));
+    if (st.places.length) box.append(h('ul', { class: 'classes' }, st.places.map((pl) => h('li', { style: 'grid-template-columns:auto 1fr auto auto' },
+      h('input', { type: 'radio', name: 'place', checked: pl.id === st.placeId, 'aria-label': 'Ехать из: ' + pl.label, onchange: () => selectPlace(pl.id) }),
+      h('div', { onclick: () => selectPlace(pl.id), style: 'cursor:pointer' }, h('div', { class: 'cls-name' }, pl.label), h('div', { class: 'cls-meta' }, pl.name)),
+      h('button', { class: 'icon-btn', type: 'button', title: 'Переименовать', 'aria-label': 'Переименовать: ' + pl.label, onclick: () => {
+        const v = prompt('Как подписать адрес?', pl.label);
+        if (v && v.trim()) { pl.label = v.trim().slice(0, 30); if (pl.id === st.placeId) st.originLabel = pl.label; save(); renderRoad(); }
+      } }, '✎'),
+      h('button', { class: 'icon-btn', type: 'button', title: 'Удалить', 'aria-label': 'Удалить: ' + pl.label, onclick: () => {
+        if (!confirm('Удалить адрес «' + pl.label + '»?')) return;
+        st.places = st.places.filter((x) => x !== pl);
+        if (st.placeId === pl.id) { if (st.places[0]) selectPlace(st.places[0].id, true); else { st.placeId = null; st.home = null; } }
+        save(); renderRoad(); scheduleNotifications();
+      } }, '×')))));
+
+    // добавить адрес
+    const used = st.places.map((x) => x.label);
+    const lab = h('input', { type: 'text', maxlength: 30, placeholder: 'Подпись, например «Дом»', value: LABELS.find((l) => !used.includes(l)) || '', 'aria-label': 'Подпись адреса' });
+    const quick = h('div', { class: 'chips' }, LABELS.map((l) => h('button', { type: 'button', class: 'pchip', onclick: () => { lab.value = l; } }, l)));
+    const results = h('ul', { class: 'results', hidden: true });
+    const q = h('input', { type: 'search', placeholder: 'Улица и дом, например Болдина 98', autocomplete: 'off', 'aria-label': 'Адрес' });
+    async function search() {
+      const text = q.value.trim();
+      if (text.length < 3) { toast('Введи хотя бы улицу'); return; }
+      results.hidden = false;
+      results.replaceChildren(h('li', null, h('button', { type: 'button', disabled: true }, 'Ищу…')));
+      try {
+        const list = await A.geocode(/тул/i.test(text) ? text : text + ', Тула');
+        results.replaceChildren();
+        if (!list.length) results.append(h('li', null, h('button', { type: 'button', disabled: true }, 'Ничего не нашлось — попробуй написать иначе')));
+        list.forEach((r) => results.append(h('li', null, h('button', { type: 'button', onclick: () => addPlace(lab.value, r) }, r.name))));
+      } catch (e) {
+        results.replaceChildren(h('li', null, h('button', { type: 'button', disabled: true }, 'Поиск не работает: ' + e.message)));
+      }
+    }
+    q.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); search(); } });
+    box.append(h('details', { open: !st.places.length },
+      h('summary', { class: 'btn ghost small', style: 'list-style:none' }, '+ Добавить адрес'),
+      h('div', { class: 'form', style: 'margin-top:10px' },
+        lab, quick,
+        h('div', { style: 'display:flex;gap:8px' }, q, h('button', { class: 'btn small', type: 'button', onclick: search }, 'Найти')),
+        results,
+        h('button', { class: 'btn ghost small', type: 'button', onclick: () => {
+          if (!navigator.geolocation) { toast('Устройство не умеет определять местоположение'); return; }
+          toast('Определяю местоположение…');
+          navigator.geolocation.getCurrentPosition(async (pos) => {
+            const lat = pos.coords.latitude, lon = pos.coords.longitude;
+            addPlace(lab.value, { name: await A.reverse(lat, lon), lat, lon });
+          }, () => toast('Нет доступа к местоположению — разреши его в настройках браузера'), { timeout: 12000 });
+        } }, 'Я сейчас здесь — сохранить по GPS'))));
+    return box;
+  }
+
   function placePicker(title, which, current) {
     const box = h('div', { class: 'place' });
     const results = h('ul', { class: 'results', hidden: true });
@@ -469,7 +573,7 @@
         for (const k of keys) {
           try { const r = await A.driveMinutes(st.home, C.BUILDINGS[k]); st.car.routes[k] = { min: r.minutes, km: r.km }; } catch (e) { break; }
         }
-        save();
+        stashCache(); save();
       } finally { routesBusy = false; if (tab === 'home') renderHome(); scheduleNotifications(); }
       return;
     }
@@ -487,6 +591,7 @@
       st.bus.plans = {};
       Object.keys(C.BUILDINGS).forEach((k) => { const pl = C.transitPlan(net, st.home, C.BUILDINGS[k]); if (pl) st.bus.plans[k] = pl; });
       st.bus.network = { at: net.at, routes: net.routes.length }; // сами маршруты не храним — хватает готовых планов
+      stashCache();
       transitStatus = net.routes.length ? '' : 'У дома не нашлось маршрутов в OpenStreetMap — задай автобус вручную.';
       save();
     } catch (e) {
@@ -522,7 +627,7 @@
       h('button', { type: 'button', 'aria-pressed': String(st.mode === 'car'), onclick: () => setMode('car') }, 'Машина')));
 
     root.append(h('div', { class: 'panel form' },
-      placePicker('Откуда', 'home', st.home),
+      placesPanel(),
       placePicker('Остановка у вуза', 'uni', st.uni),
       h('p', { class: 'hint' }, 'Корпус определяется сам по аудитории из расписания (Гл.-403 → главный корпус, 9-306 → корпус 9). Маршрут на машине строится до нужного корпуса, на автобусе добавляется путь пешком от остановки до корпуса.'),
       field('Прийти заранее, мин', numInput(st, 'earlyMin', 0, 60, scheduleNotifications), 'Чтобы спокойно раздеться и найти аудиторию.'),
