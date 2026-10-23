@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Успею — во сколько выходить и что надеть</title>
+  <meta name="description" content="Считает, во сколько выходить из дома к первой паре на автобусе или машине, учитывает погоду и напоминает о выходе.">
+  <meta name="theme-color" content="#F2C230">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Успею">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Unbounded:wght@500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <svg viewBox="0 0 32 32" width="28" height="28" aria-hidden="true">
+        <rect x="1" y="1" width="30" height="30" rx="8" fill="#F2C230" stroke="#16263A" stroke-width="2"/>
+        <circle cx="16" cy="16" r="8.5" fill="none" stroke="#16263A" stroke-width="2.4"/>
+        <path d="M16 11v5.2l3.4 2.2" fill="none" stroke="#16263A" stroke-width="2.4" stroke-linecap="round"/>
+      </svg>
+      <span>Успею</span>
+    </div>
+    <div class="top-date" id="top-date"></div>
+  </header>
+
+  <main id="main">
+    <section class="view" id="view-home" aria-label="Сегодня"></section>
+    <section class="view" id="view-pairs" aria-label="Пары" hidden></section>
+    <section class="view" id="view-road" aria-label="Дорога" hidden></section>
+    <section class="view" id="view-settings" aria-label="Настройки" hidden></section>
+  </main>
+
+  <nav class="tabbar" aria-label="Разделы">
+    <button type="button" data-tab="home" aria-current="page">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>
+      <span>Сегодня</span>
+    </button>
+    <button type="button" data-tab="pairs">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>
+      <span>Пары</span>
+    </button>
+    <button type="button" data-tab="road">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4.5" y="3.5" width="15" height="14" rx="3"/><path d="M4.5 11h15M8 17.5V20M16 17.5V20"/><circle cx="8.5" cy="14.3" r=".6"/><circle cx="15.5" cy="14.3" r=".6"/></svg>
+      <span>Дорога</span>
+    </button>
+    <button type="button" data-tab="settings">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg>
+      <span>Настройки</span>
+    </button>
+  </nav>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <noscript><p class="noscript">Для работы сайта включите JavaScript.</p></noscript>
+
+  <script src="js/core.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
