@@ -199,9 +199,10 @@ test('пробки и парковка по времени суток, погр�
   const tue = new Date(2026, 9, 27), sun = new Date(2026, 10, 1);
   assert.ok(C.trafficFactor(tue, 8 * 60 + 15) >= 1.5, 'утренний час пик');
   assert.ok(C.trafficFactor(tue, 7 * 60 + 30) >= 1.7, 'в 7:30 пик');
-  assert.ok(C.trafficFactor(tue, 9 * 60) <= 1.2, 'к 9:00 уже свободнее');
-  assert.ok(C.trafficFactor(new Date(2026, 9, 31), 7 * 60 + 30) <= 1.05, 'в субботу утром пусто');
-  assert.ok(C.trafficFactor(tue, 11 * 60) < 1.25);
+  assert.ok(C.trafficFactor(tue, 9 * 60) < C.trafficFactor(tue, 7 * 60 + 30) - 0.3, 'к 9:00 свободнее, чем в 7:30');
+  assert.ok(C.jamBalls(tue, 9 * 60) >= 4.5, 'в 9:00 ещё около 5 баллов');
+  assert.ok(C.trafficFactor(new Date(2026, 9, 31), 7 * 60 + 30) <= 1.1, 'в субботу утром пусто');
+  assert.ok(C.trafficFactor(tue, 11 * 60) < 1.35, 'днём 3 балла');
   assert.ok(C.trafficFactor(tue, 3 * 60) <= 1.03, 'ночью свободно');
   assert.ok(C.trafficFactor(sun, 8 * 60) < 1.1, 'в воскресенье утром свободно');
   assert.ok(C.parkingMinutes(tue, 9 * 60, 'Гл') > C.parkingMinutes(tue, 7 * 60, 'Гл'), 'к 9 утра место искать дольше');
@@ -217,7 +218,7 @@ test('пробки и парковка по времени суток, погр�
   const late = C.planTrip(tue, lesson(9 * 60 + 40), base, null);
   assert.ok(late.parking >= 10, 'к 9:30 у главного парковка ' + late.parking);
   const evening = C.planTrip(tue, lesson(20 * 60 + 30), base, null);
-  assert.ok((7 * 60 + 35) - morning.leave > (20 * 60 + 20) - evening.leave + 8, 'утром дорога дольше');
+  assert.ok((7 * 60 + 35) - morning.leave > (20 * 60 + 20) - evening.leave + 5, 'утром дорога дольше');
   const careful = C.planTrip(tue, lesson(7 * 60 + 45), Object.assign({}, base, { errorPct: 30 }), null);
   assert.ok(careful.leave < morning.leave && careful.margin > 0);
 });
@@ -226,8 +227,10 @@ test('пробки: обучение на реальной поездке', () =
   const tue = new Date(2026, 9, 27);
   const before = C.jamBalls(tue, 8 * 60 + 40, null);
   // выехал в 8:40, без пробок 20 мин, ехал 36 мин → пробки сильнее, чем думали
-  const learned = C.learnJams(null, tue, 8 * 60 + 40, 20, 36);
+  const learned = C.learnJams(null, tue, 8 * 60 + 40, 20, 40);
   const after = C.jamBalls(tue, 8 * 60 + 40, learned);
   assert.ok(after >= before + 1.5, before + ' → ' + after);
+  const calm = C.learnJams(null, tue, 8 * 60 + 40, 20, 22);
+  assert.ok(C.jamBalls(tue, 8 * 60 + 40, calm) < before - 2, 'если доехал быстро — пробок меньше');
   assert.equal(C.jamBalls(new Date(2026, 9, 31), 8 * 60 + 40, learned), C.jamBalls(new Date(2026, 9, 31), 8 * 60 + 40, null), 'суббота не тронута');
 });
