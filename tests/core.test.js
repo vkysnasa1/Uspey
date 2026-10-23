@@ -197,7 +197,10 @@ test('транспорт: подбирается маршрут с посадк�
 
 test('пробки и парковка по времени суток, погрешность', () => {
   const tue = new Date(2026, 9, 27), sun = new Date(2026, 10, 1);
-  assert.ok(C.trafficFactor(tue, 8 * 60 + 15) >= 1.6, 'утренний час пик');
+  assert.ok(C.trafficFactor(tue, 8 * 60 + 15) >= 1.5, 'утренний час пик');
+  assert.ok(C.trafficFactor(tue, 7 * 60 + 30) >= 1.7, 'в 7:30 пик');
+  assert.ok(C.trafficFactor(tue, 9 * 60) <= 1.2, 'к 9:00 уже свободнее');
+  assert.ok(C.trafficFactor(new Date(2026, 9, 31), 7 * 60 + 30) <= 1.05, 'в субботу утром пусто');
   assert.ok(C.trafficFactor(tue, 11 * 60) < 1.25);
   assert.ok(C.trafficFactor(tue, 3 * 60) <= 1.03, 'ночью свободно');
   assert.ok(C.trafficFactor(sun, 8 * 60) < 1.1, 'в воскресенье утром свободно');
@@ -209,11 +212,22 @@ test('пробки и парковка по времени суток, погр�
   const base = { mode: 'car', earlyMin: 10, errorPct: 0, semesterStart: '2026-09-01', pairTimes: C.DEFAULT_PAIRS,
     car: { manualMin: 20, traffic: 'auto', parkingAuto: true, routes: {} }, bus: {} };
   const lesson = (start) => [{ date: '2026-10-27', start, end: start + 95, subject: 'X', room: 'Гл.-104' }];
-  const morning = C.planTrip(tue, lesson(9 * 60 + 40), base, null);
+  const morning = C.planTrip(tue, lesson(7 * 60 + 45), base, null);
   assert.ok(morning.traffic >= 1.5, 'коэффициент ' + morning.traffic);
-  assert.ok(morning.parking >= 10);
+  const late = C.planTrip(tue, lesson(9 * 60 + 40), base, null);
+  assert.ok(late.parking >= 10, 'к 9:30 у главного парковка ' + late.parking);
   const evening = C.planTrip(tue, lesson(20 * 60 + 30), base, null);
-  assert.ok((9 * 60 + 30) - morning.leave > (20 * 60 + 20) - evening.leave + 10, 'утром дорога дольше');
-  const careful = C.planTrip(tue, lesson(9 * 60 + 40), Object.assign({}, base, { errorPct: 30 }), null);
+  assert.ok((7 * 60 + 35) - morning.leave > (20 * 60 + 20) - evening.leave + 8, 'утром дорога дольше');
+  const careful = C.planTrip(tue, lesson(7 * 60 + 45), Object.assign({}, base, { errorPct: 30 }), null);
   assert.ok(careful.leave < morning.leave && careful.margin > 0);
+});
+
+test('пробки: обучение на реальной поездке', () => {
+  const tue = new Date(2026, 9, 27);
+  const before = C.jamBalls(tue, 8 * 60 + 40, null);
+  // выехал в 8:40, без пробок 20 мин, ехал 36 мин → пробки сильнее, чем думали
+  const learned = C.learnJams(null, tue, 8 * 60 + 40, 20, 36);
+  const after = C.jamBalls(tue, 8 * 60 + 40, learned);
+  assert.ok(after >= before + 1.5, before + ' → ' + after);
+  assert.equal(C.jamBalls(new Date(2026, 9, 31), 8 * 60 + 40, learned), C.jamBalls(new Date(2026, 9, 31), 8 * 60 + 40, null), 'суббота не тронута');
 });

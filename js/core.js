@@ -343,28 +343,37 @@
   /* ---------- пробки и парковка: модель по времени суток ----------
      Бесплатных данных о пробках в реальном времени нет, поэтому — типичный профиль города:
      коэффициент к времени в пути без пробок (1 = свободно). Точки: [минута суток, коэффициент]. */
-  const TRAFFIC = {
-    weekday: [[0, 1], [390, 1.05], [435, 1.35], [465, 1.6], [495, 1.7], [525, 1.55], [570, 1.3], [630, 1.15], [720, 1.2], [780, 1.25], [990, 1.4], [1050, 1.65], [1110, 1.5], [1170, 1.2], [1260, 1.05], [1439, 1]],
-    saturday: [[0, 1], [540, 1.05], [720, 1.25], [900, 1.2], [1140, 1.05], [1439, 1]],
-    sunday: [[0, 1], [720, 1.1], [1439, 1]],
+  // Пробки в баллах 0–10, как у Яндекса, по получасам (48 значений с 0:00). 1 балл ≈ +9 % к времени в пути.
+  // Профиль Тулы по умолчанию: утром в будни резкий пик в 7:30–8:00, к 9:00 уже свободнее; в субботу почти пусто.
+  const H = (spec) => { const a = new Array(48).fill(0); Object.keys(spec).forEach((k) => { const [f, t] = k.split('-').map(Number); for (let s = f; s <= (t == null ? f : t); s++) a[s] = spec[k]; }); return a; };
+  const DEFAULT_JAMS = {
+    weekday: H({ '12': 1, '13': 2, '14': 5, '15': 8, '16': 7, '17': 5, '18': 2, '19': 2, '20-23': 2, '24-31': 3, '32': 4, '33': 5, '34': 7, '35': 8, '36': 7, '37': 5, '38': 4, '39': 3, '40-41': 2, '42-43': 1 }),
+    saturday: H({ '18-23': 1, '24-31': 2, '32-39': 2, '40-43': 1 }),
+    sunday: H({ '20-35': 1, '36-39': 2, '40-41': 1 }),
   };
-  function interp(points, m) {
-    for (let i = 1; i < points.length; i++) {
-      if (m <= points[i][0]) {
-        const [x0, y0] = points[i - 1], [x1, y1] = points[i];
-        return y0 + (y1 - y0) * (m - x0) / (x1 - x0);
-      }
-    }
-    return points[points.length - 1][1];
+  const JAM_STEP = 0.09;
+  function jamsKind(date) { const d = dayIndex(date); return d === 6 ? 'sunday' : d === 5 ? 'saturday' : 'weekday'; }
+  function jamBalls(date, minute, jams) {
+    const prof = (jams && jams[jamsKind(date)]) || DEFAULT_JAMS[jamsKind(date)];
+    const m = Math.max(0, Math.min(1439, minute)), s = Math.floor(m / 30), fr = (m - s * 30) / 30;
+    let b = prof[s] + ((prof[Math.min(47, s + 1)] - prof[s]) * fr);
+    const d = dayIndex(date);
+    if (d === 0 && m < 720) b += 1;      // понедельник утром
+    if (d === 4 && m >= 900) b += 1;     // пятница вечером
+    return Math.max(0, Math.min(10, Math.round(b * 10) / 10));
   }
-  function trafficFactor(date, minute) {
-    const d = dayIndex(date), m = Math.max(0, Math.min(1439, minute));
-    let f = interp(d === 6 ? TRAFFIC.sunday : d === 5 ? TRAFFIC.saturday : TRAFFIC.weekday, m);
-    if (d === 0 && m < 720) f *= 1.05;  // понедельник утром тяжелее
-    if (d === 4 && m > 900) f *= 1.05;  // пятница вечером
-    return Math.round(f * 100) / 100;
+  function trafficFactor(date, minute, jams) { return Math.round((1 + jamBalls(date, minute, jams) * JAM_STEP) * 100) / 100; }
+  // Учимся на реальных поездках: «ехал N мин» → поправляем баллы в получасе выезда (и чуть-чуть в соседних)
+  function learnJams(jams, date, departMin, driveMin, actualMin) {
+    const kind = jamsKind(date), out = JSON.parse(JSON.stringify(jams || DEFAULT_JAMS));
+    if (!(driveMin > 0) || !(actualMin > 0)) return out;
+    const obs = Math.max(0, Math.min(10, ((actualMin / driveMin) - 1) / JAM_STEP));
+    const s = Math.max(0, Math.min(47, Math.floor(departMin / 30)));
+    out[kind][s] = Math.round((out[kind][s] * 0.4 + obs * 0.6) * 10) / 10;
+    [s - 1, s + 1].forEach((k) => { if (k >= 0 && k < 48) out[kind][k] = Math.round((out[kind][k] * 0.8 + obs * 0.2) * 10) / 10; });
+    return out;
   }
-  function trafficLabel(f) { return f >= 1.55 ? 'час пик' : f >= 1.3 ? 'плотно' : f >= 1.1 ? 'небольшие пробки' : 'свободно'; }
+  function trafficLabel(f) { const b = Math.round((f - 1) / JAM_STEP); return b + ' ' + (b % 10 === 1 && b !== 11 ? 'балл' : b % 10 >= 2 && b % 10 <= 4 && (b < 12 || b > 14) ? 'балла' : 'баллов'); }
   // Сколько искать место и дойти до входа: у главного корпуса и на Болдина утром мест почти нет
   const DENSE = { 'Гл': 1, '6': 1, '8': 1, '9': 1, '10': 1, '11': 1, 'Лаб6': 1, 'Спорт': 1 };
   function parkingMinutes(date, arrive, bKey) {
@@ -415,17 +424,17 @@
       // время выезда зависит от пробок, а пробки — от времени выезда: уточняем в несколько шагов
       let leave = target - drive * 1.4 - 10, f = 1, road = drive, parking = 0, margin = 0;
       for (let k = 0; k < 4; k++) {
-        f = autoTraffic ? Math.max(trafficFactor(date, leave), trafficFactor(date, (leave + target) / 2)) : +car.traffic || 1;
+        f = autoTraffic ? Math.max(trafficFactor(date, leave, settings.jams), trafficFactor(date, (leave + target) / 2, settings.jams)) : +car.traffic || 1;
         road = Math.round(drive * f) + delay.minutes;
         parking = autoParking ? parkingMinutes(date, target - 5, bKey) : +car.parking || 0;
         margin = errorMargin(settings, road + parking);
         leave = target - road - parking - margin;
       }
       return Object.assign(base, {
-        status: 'ok', leave, routeKm: r ? r.km : car.routeKm, traffic: f, parking, margin,
+        status: 'ok', leave, routeKm: r ? r.km : car.routeKm, traffic: f, parking, margin, drive,
         steps: [
           { t: leave, text: out + ' и сесть в машину' + (margin ? ' (запас на погрешность ' + margin + ' мин)' : '') },
-          { t: leave + margin + road, text: 'Подъехать: ' + where + ' — без пробок ' + drive + ' мин, сейчас ×' + String(f).replace('.', ',') + ' (' + trafficLabel(f) + ')' + (delay.minutes ? ', погода +' + delay.minutes : '') },
+          { t: leave + margin + road, text: 'Подъехать: ' + where + ' — без пробок ' + drive + ' мин, пробки ' + trafficLabel(f) + ' (×' + String(f).replace('.', ',') + ')' + (delay.minutes ? ', погода +' + delay.minutes : '') },
           { t: leave + margin + road + parking, text: 'Найти место и дойти до аудитории — ~' + parking + ' мин' },
           { t: first.start, text: aud },
         ],
@@ -447,7 +456,7 @@
     if (!deps.length) return Object.assign(base, { status: 'no-bus' });
     // автобусы и троллейбусы стоят в тех же пробках (слабее — есть выделенки), трамвай почти нет
     const baseRide = auto ? auto.ride : +bus.ride || 0;
-    const tf = settings.trafficAuto === false ? 1 : trafficFactor(date, target - baseRide - 10);
+    const tf = settings.trafficAuto === false ? 1 : trafficFactor(date, target - baseRide - 10, settings.jams);
     const share = auto && auto.type === 'tram' ? 0.15 : 0.6;
     const ft = Math.round((1 + (tf - 1) * share) * 100) / 100;
     const ride = Math.round(baseRide * ft) + delay.minutes;
@@ -536,7 +545,7 @@
     DEFAULT_PAIRS, DAYS, DAYS_SHORT, toMin, fmt, duration, parseTimes, intervalTimes,
     parseDate, ymd, addDays, dayIndex, weekNumber, weekParity, atMinutes,
     pairTime, classesFor, parseTulsu, describe, parseForecast, commuteWeather, conditions,
-    weatherDelay, clothing, warnings, BUILDINGS, buildingOf, distanceM, walkMinutes, transitPlan, trafficFactor, parkingMinutes, errorMargin, busDepartures, planTrip, upcomingTrips, buildICS, icsFold,
+    weatherDelay, clothing, warnings, BUILDINGS, buildingOf, distanceM, walkMinutes, transitPlan, trafficFactor, jamBalls, DEFAULT_JAMS, JAM_STEP, parkingMinutes, errorMargin, learnJams, busDepartures, planTrip, upcomingTrips, buildICS, icsFold,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = Core;
   else root.Core = Core;

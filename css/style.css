@@ -197,3 +197,10 @@ textarea { min-height: 88px; resize: vertical; }
 .pchip[aria-pressed=true] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
 .place input[type=radio] { width: 20px; height: 20px; accent-color: var(--ink); }
 details > summary::-webkit-details-marker { display: none; }
+
+/* пробки по часам */
+.jams { display: grid; grid-template-columns: repeat(32, 1fr); gap: 2px; height: 110px; align-items: end; padding: 4px 0; border-bottom: 1.5px solid var(--line); }
+.jam { height: 100%; display: flex; align-items: flex-end; padding: 0; border: 0; background: transparent; cursor: pointer; border-radius: 3px 3px 0 0; }
+.jam span { display: block; width: 100%; border-radius: 3px 3px 0 0; }
+.jam.sel { outline: 2px solid var(--ink); outline-offset: 1px; }
+.jam-axis { display: flex; justify-content: space-between; }

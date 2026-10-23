@@ -148,6 +148,8 @@
     }
     const now = new Date();
     const trips = C.upcomingTrips(now, allLessons(), S.settings, W.forecast, 8);
+    const lp = learnPanel(C.planTrip(now, allLessons(), S.settings, W.forecast));
+    if (lp) root.append(lp);
     if (!trips.length) {
       root.append(h('div', { class: 'plate quiet' },
         h('p', { class: 'plate-lead' }, 'На ближайшую неделю пар нет'),
@@ -411,6 +413,58 @@
   }
 
   /* ---------- ДОРОГА ---------- */
+  /* ---- пробки по часам: просмотр и правка ---- */
+  let jamKind = 'weekday', jamSel = 15;
+  function jamsPanel() {
+    const st = S.settings;
+    const prof = (st.jams || C.DEFAULT_JAMS)[jamKind];
+    const kinds = [['weekday', 'Будни'], ['saturday', 'Суббота'], ['sunday', 'Воскресенье']];
+    const color = (b) => (b >= 7 ? '#C8402A' : b >= 4 ? '#E0A21B' : '#3E9B66');
+    const bars = h('div', { class: 'jams', role: 'group', 'aria-label': 'Пробки по получасам' });
+    for (let s = 12; s <= 43; s++) {
+      const b = prof[s];
+      bars.append(h('button', { type: 'button', class: 'jam' + (s === jamSel ? ' sel' : ''), title: C.fmt(s * 30) + ' — ' + b + ' б.', 'aria-label': C.fmt(s * 30) + ', ' + b + ' баллов',
+        onclick: () => { jamSel = s; renderRoad(); } },
+        h('span', { style: 'height:' + Math.max(4, b * 10) + '%;background:' + color(b) })));
+    }
+    const change = (d) => {
+      st.jams = JSON.parse(JSON.stringify(st.jams || C.DEFAULT_JAMS));
+      st.jams[jamKind][jamSel] = Math.max(0, Math.min(10, Math.round((st.jams[jamKind][jamSel] + d) * 10) / 10));
+      save(); renderRoad(); scheduleNotifications();
+    };
+    return h('div', { class: 'panel form' },
+      h('h2', null, 'Пробки по часам'),
+      h('p', { class: 'hint' }, 'В баллах, как у Яндекса: 0 — свободно, 10 — стоит всё. Утром в будни пик в 7:30, к 9:00 уже свободнее, в субботу почти пусто. Нажми на столбик и поправь под свой маршрут. Ещё точнее станет само: после поездки на машине укажи, сколько ехал.'),
+      h('div', { class: 'seg', style: 'grid-template-columns:repeat(3,1fr)' }, kinds.map((k) => h('button', { type: 'button', 'aria-pressed': String(k[0] === jamKind), onclick: () => { jamKind = k[0]; renderRoad(); } }, k[1]))),
+      bars,
+      h('div', { class: 'jam-axis small muted' }, ['6:00', '9:00', '12:00', '15:00', '18:00', '21:00'].map((x) => h('span', null, x))),
+      h('div', { style: 'display:flex;gap:10px;align-items:center' },
+        h('b', { style: 'min-width:150px' }, C.fmt(jamSel * 30) + '–' + C.fmt(jamSel * 30 + 30) + ': ' + prof[jamSel] + ' б.'),
+        h('button', { class: 'btn ghost small', type: 'button', 'aria-label': 'Меньше пробок', onclick: () => change(-1) }, '−'),
+        h('button', { class: 'btn ghost small', type: 'button', 'aria-label': 'Больше пробок', onclick: () => change(1) }, '+'),
+        st.jams ? h('button', { class: 'btn ghost small', type: 'button', onclick: () => { st.jams = null; save(); renderRoad(); scheduleNotifications(); } }, 'Сбросить') : null));
+  }
+
+  // после поездки на машине: «сколько ехал?» — пробки подстраиваются под реальность
+  function learnPanel(t) {
+    const st = S.settings, now = new Date(), nowMin = now.getHours() * 60 + now.getMinutes();
+    if (!t || t.status !== 'ok' || t.mode !== 'car' || !t.drive || st.jamsAsked === C.ymd(t.date)) return null;
+    const arrive = t.leave + t.margin + Math.round(t.drive * t.traffic) + t.delay.minutes;
+    if (C.ymd(t.date) !== C.ymd(now) || nowMin < arrive || nowMin > arrive + 240) return null;
+    const inp = h('input', { type: 'number', inputmode: 'numeric', min: 1, max: 180, placeholder: String(Math.round(t.drive * t.traffic)), 'aria-label': 'Сколько минут ехал' });
+    return h('div', { class: 'panel form' },
+      h('h2', null, 'Сколько ехал сегодня?'),
+      h('p', { class: 'hint' }, 'Выезд в ' + C.fmt(t.leave) + '. По расчёту дорога ≈ ' + Math.round(t.drive * t.traffic) + ' мин. Напиши, сколько вышло на самом деле, — пробки в это время подстроятся.'),
+      h('div', { style: 'display:flex;gap:8px' }, inp,
+        h('button', { class: 'btn small', type: 'button', onclick: () => {
+          const v = +inp.value;
+          if (!(v > 0)) { toast('Впиши минуты'); return; }
+          st.jams = C.learnJams(st.jams, t.date, t.leave + t.margin, t.drive, Math.max(1, v - t.delay.minutes));
+          st.jamsAsked = C.ymd(t.date); save(); toast('Учёл: пробки обновлены'); renderHome();
+        } }, 'Сохранить'),
+        h('button', { class: 'btn ghost small', type: 'button', onclick: () => { st.jamsAsked = C.ymd(t.date); save(); renderHome(); } }, 'Не ехал')));
+  }
+
   /* ---- мои адреса: Дом, Работа, Общага… ---- */
   const LABELS = ['Дом', 'Работа', 'Общежитие', 'Родители', 'Девушка', 'Друг'];
   const curPlace = () => S.settings.places.find((x) => x.id === S.settings.placeId) || null;
@@ -688,7 +742,7 @@
         field('Время без пробок вручную, мин', numInput(c, 'manualMin', 1, 180, re), 'Используется, если маршрут не рассчитан.'),
         field('Пробки', h('select', { onchange: (e) => { c.traffic = e.target.value === 'auto' ? 'auto' : +e.target.value; save(); renderRoad(); re(); } },
           [['auto', 'Сам — по времени суток и дню недели'], [1, 'Всегда свободно'], [1.3, 'Всегда средние'], [1.6, 'Всегда сильные']].map((o) => h('option', { value: o[0], selected: String(c.traffic) === String(o[0]) }, o[1]))),
-          c.traffic === 'auto' ? 'Утром в будни к 8:00–9:00 дорога ≈ в 1,6–1,7 раза дольше, днём ≈ 1,2, вечером в 17:30 снова пик. Автобусы тоже стоят в пробках, трамвай почти нет.' : null),
+          c.traffic === 'auto' ? 'Пробки по часам — ниже: в будни пик в 7:30 (дорога ≈ в 1,7 раза дольше), к 9:00 уже ≈ 1,2, вечером в 17:30 снова пик, в субботу почти пусто. Автобусы тоже стоят в пробках, трамвай почти нет.' : null),
         h('label', { style: 'display:flex;gap:10px;align-items:center;font-weight:600' },
           h('input', { type: 'checkbox', checked: c.parkingAuto !== false, onchange: (e) => { c.parkingAuto = e.target.checked; save(); renderRoad(); re(); } }),
           'Время на парковку считать самому'),
@@ -696,6 +750,7 @@
           ? h('p', { class: 'hint' }, 'У главного корпуса и на Болдина к 8–10 утра место ищут до 15 минут, рано утром и вечером — 5–6. У дальних корпусов быстрее.')
           : field('Парковка и дойти до аудитории, мин', numInput(c, 'parking', 0, 60, re))));
     }
+    if (st.mode === 'car' || st.trafficAuto !== false) root.append(jamsPanel());
   }
 
   /* ---------- НАСТРОЙКИ ---------- */
