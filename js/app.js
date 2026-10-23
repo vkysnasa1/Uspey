@@ -34,6 +34,7 @@
       const s = JSON.parse(localStorage.getItem(KEY));
       if (s && typeof s === 'object') {
         if (Array.isArray(s.schedule)) d.schedule = s.schedule;
+        d.schedule.forEach((c, i) => { if (!c.id) c.id = 'm' + i + Math.random().toString(36).slice(2, 6); });
         if (s.tulsu && Array.isArray(s.tulsu.lessons)) d.tulsu = s.tulsu;
         if (Array.isArray(s.hidden)) d.hidden = s.hidden;
         const st = s.settings || {};
@@ -63,7 +64,7 @@
     if (!l.date) return false;
     return S.hidden.some((x) => x.subject === l.subject && (!x.teacher || x.teacher === l.teacher) && (
       x.kind === 'once' ? x.date === l.date && x.start === l.start
-        : x.kind === 'weekly' ? x.day === C.dayIndex(C.parseDate(l.date)) && x.start === l.start
+        : x.kind === 'weekly' ? x.day === C.dayIndex(C.parseDate(l.date)) && x.start === l.start && (!x.parity || x.parity === C.weekParity(C.parseDate(l.date), S.settings.semesterStart))
           : x.kind === 'teacher' ? true : false));
   }
   const allLessons = () => S.schedule.concat(S.tulsu ? S.tulsu.lessons.filter((l) => !isHidden(l)) : []);
@@ -341,59 +342,92 @@
   }
 
   let menuFor = null;
-  function hideLesson(c, kind) {
+  function hideLesson(c, kind, parity) {
     const rule = { kind, subject: c.subject, start: c.start };
+    if (parity) rule.parity = parity;
     if (kind === 'once') rule.date = c.date;
     if (kind === 'weekly') rule.day = C.dayIndex(C.parseDate(c.date));
     rule.teacher = c.teacher || ''; // чтобы не скрыть пару другой подгруппы в то же время
     S.hidden.push(rule); menuFor = null; save(); renderPairs(); scheduleNotifications();
-    toast(kind === 'once' ? 'Скрыто на ' + c.date.split('-').reverse().slice(0, 2).join('.') : 'Скрыто на все недели');
+    toast(kind === 'once' ? 'Скрыто на ' + c.date.split('-').reverse().slice(0, 2).join('.') : parity ? 'Скрыто по ' + (parity === 'odd' ? 'нечётным' : 'чётным') + ' неделям' : 'Скрыто на все недели');
   }
-  function upcomingDays() {
-    const box = h('div', { class: 'panel day' }, h('h2', null, 'Ближайшие пары'),
-      h('p', { class: 'hint' }, 'Пара не твоя (другая подгруппа, язык, физра)? Нажми × и скрой её — только в этот день или на все недели.'));
-    const now = new Date();
-    let shown = 0;
-    for (let i = 0; i < 14 && shown < 6; i++) {
-      const d = C.addDays(now, i);
-      const list = C.classesFor(d, allLessons(), S.settings);
-      if (!list.length) continue;
-      shown++;
-      box.append(h('h3', { style: 'margin-top:10px' }, dayLabel(d), h('span', { class: 'muted small' }, d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }))),
-        h('ul', { class: 'classes' }, list.map((c) => {
-          const key = (c.date || C.ymd(d)) + c.start + c.subject;
-          const own = !c.date;
-          if (menuFor === key && !own) {
-            return h('li', { style: 'grid-template-columns:1fr' }, h('div', { class: 'form' },
-              h('b', null, 'Скрыть «' + c.subject + '»?'),
-              h('div', { class: 'btn-row' },
-                h('button', { class: 'btn small', type: 'button', onclick: () => hideLesson(c, 'weekly') }, 'Каждую неделю (' + C.DAYS_SHORT[C.dayIndex(d)] + ', ' + C.fmt(c.start) + ')'),
-                h('button', { class: 'btn ghost small', type: 'button', onclick: () => hideLesson(c, 'once') }, 'Только ' + d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }))),
-              c.teacher ? h('button', { class: 'btn ghost small', type: 'button', onclick: () => hideLesson(c, 'teacher') }, 'Все пары этого предмета у ' + c.teacher.split(' ')[0]) : null,
-              h('button', { class: 'btn ghost small', type: 'button', onclick: () => { menuFor = null; renderPairs(); } }, 'Отмена')));
-          }
-          return h('li', null,
-            h('span', { class: 'pair-no' }, c.pair),
-            h('div', null,
-              h('div', { class: 'cls-name' }, c.subject, own ? h('span', { class: 'badge' }, 'своё') : null, c.note ? h('span', { class: 'badge' }, c.note) : null),
-              h('div', { class: 'cls-meta' }, C.fmt(c.start) + '–' + C.fmt(c.end) + (c.room ? ', ауд. ' + c.room : '') + (c.teacher ? ' · ' + c.teacher : ''))),
-            h('button', { class: 'icon-btn', type: 'button', title: own ? 'Удалить на все недели' : 'Скрыть', 'aria-label': (own ? 'Удалить: ' : 'Скрыть: ') + c.subject, onclick: () => {
-              if (own) {
-                if (!confirm('Удалить «' + c.subject + '» на все недели?')) return;
-                S.schedule = S.schedule.filter((x) => !(x.day === c.day && x.pair === c.pair && x.subject === c.subject));
-                save(); renderPairs(); scheduleNotifications();
-              } else { menuFor = key; renderPairs(); }
-            } }, '×'));
-        })));
+  const PAR_RU = { odd: 'нечётная', even: 'чётная' }, PAR_PL = { odd: 'нечётные', even: 'чётные' };
+  let weekOffset = 0, addFor = null; // addFor: { day, week } — быстрое добавление своей пары в день
+  function twoWeeks() {
+    const now = new Date(), st = S.settings;
+    const mon0 = C.addDays(now, -C.dayIndex(now));
+    const weeks = [0, 1].map((k) => { const m = C.addDays(mon0, 7 * k); return { k, mon: m, par: C.weekParity(m, st.semesterStart) }; });
+    const w = weeks[weekOffset];
+    const fmtD = (d) => d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'numeric' });
+    const box = h('div', { class: 'panel day' },
+      h('h2', null, 'Расписание на две недели'),
+      h('div', { class: 'seg', role: 'group', 'aria-label': 'Неделя' }, weeks.map((x) => h('button', { type: 'button', 'aria-pressed': String(x.k === weekOffset), onclick: () => { weekOffset = x.k; menuFor = null; renderPairs(); } },
+        PAR_RU[x.par][0].toUpperCase() + PAR_RU[x.par].slice(1) + (x.k ? ' · след.' : ' · эта')))),
+      h('p', { class: 'hint', style: 'margin-top:8px' }, fmtD(w.mon) + '–' + fmtD(C.addDays(w.mon, 5)) + ', ' + PAR_RU[w.par] + ' неделя. Нечётные и чётные недели чередуются: настрой обе — и расписание будет верным весь семестр. Не твоя пара — ×, своя — «+ своя пара».'));
+    for (let di = 0; di < 6; di++) {
+      const d = C.addDays(w.mon, di), past = C.ymd(d) < C.ymd(now);
+      const list = C.classesFor(d, allLessons(), st);
+      const head = h('h3', { style: 'margin-top:12px' + (past ? ';opacity:.55' : '') }, C.DAYS[di] + ', ' + d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }),
+        h('button', { class: 'btn ghost small', type: 'button', style: 'min-height:30px;padding:2px 10px', onclick: () => { addFor = addFor && addFor.day === di ? null : { day: di, week: 'all', par: w.par }; renderPairs(); } }, '+ своя пара'));
+      box.append(head);
+      if (addFor && addFor.day === di) box.append(quickAdd(di, w.par));
+      if (!list.length) { box.append(h('p', { class: 'small muted', style: 'margin:0 0 4px' }, 'Пар нет')); continue; }
+      box.append(h('ul', { class: 'classes', style: past ? 'opacity:.55' : '' }, list.map((c) => lessonRow(c, d, w.par))));
     }
-    if (!shown) box.append(h('p', { class: 'muted' }, 'В ближайшие две недели пар нет.'));
     if (S.hidden.length) {
       box.append(h('details', { style: 'margin-top:12px' }, h('summary', { class: 'small', style: 'cursor:pointer;font-weight:700' }, 'Скрытые занятия: ' + S.hidden.length),
         h('ul', { class: 'week' }, S.hidden.map((x) => h('li', null,
-          h('span', { class: 'small' }, x.subject + ' — ' + (x.kind === 'weekly' ? 'каждый ' + C.DAYS[x.day].toLowerCase() + ' в ' + C.fmt(x.start) : x.kind === 'once' ? x.date.split('-').reverse().join('.') + ' в ' + C.fmt(x.start) : 'у ' + x.teacher)),
+          h('span', { class: 'small' }, x.subject + ' — ' + (x.kind === 'weekly' ? (x.parity ? 'по ' + (x.parity === 'odd' ? 'нечётным' : 'чётным') + ' неделям, ' : 'каждую неделю, ') + C.DAYS_SHORT[x.day] + ' ' + C.fmt(x.start)
+            : x.kind === 'once' ? x.date.split('-').reverse().join('.') + ' в ' + C.fmt(x.start) : 'у ' + x.teacher)),
           h('button', { class: 'btn ghost small', type: 'button', onclick: () => { S.hidden = S.hidden.filter((y) => y !== x); save(); renderPairs(); scheduleNotifications(); } }, 'Вернуть'))))));
     }
     return box;
+  }
+  function lessonRow(c, d, par) {
+    const key = (c.date || C.ymd(d)) + c.start + c.subject + (c.teacher || '');
+    const own = !c.date;
+    const other = par === 'odd' ? 'even' : 'odd';
+    if (menuFor === key && !own) {
+      return h('li', { style: 'grid-template-columns:1fr' }, h('div', { class: 'form' },
+        h('b', null, 'Скрыть «' + c.subject + '»' + (c.teacher ? ' у ' + c.teacher.split(' ')[0] : '') + '?'),
+        h('button', { class: 'btn small', type: 'button', onclick: () => hideLesson(c, 'weekly', par) }, 'По ' + (par === 'odd' ? 'нечётным' : 'чётным') + ' неделям (' + C.DAYS_SHORT[C.dayIndex(d)] + ', ' + C.fmt(c.start) + ')'),
+        h('button', { class: 'btn ghost small', type: 'button', onclick: () => hideLesson(c, 'weekly') }, 'Каждую неделю — и чётную, и нечётную'),
+        h('button', { class: 'btn ghost small', type: 'button', onclick: () => hideLesson(c, 'once') }, 'Только ' + d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })),
+        c.teacher ? h('button', { class: 'btn ghost small', type: 'button', onclick: () => hideLesson(c, 'teacher') }, 'Все пары предмета у ' + c.teacher.split(' ')[0]) : null,
+        h('button', { class: 'btn ghost small', type: 'button', onclick: () => { menuFor = null; renderPairs(); } }, 'Отмена')));
+    }
+    if (menuFor === key && own) {
+      return h('li', { style: 'grid-template-columns:1fr' }, h('div', { class: 'form' },
+        h('b', null, 'Удалить «' + c.subject + '»?'),
+        c.week === 'all' ? h('button', { class: 'btn small', type: 'button', onclick: () => {
+          const src = S.schedule.find((x) => x.id === c.id); if (src) src.week = other; menuFor = null; save(); renderPairs(); scheduleNotifications();
+        } }, 'Только по ' + (par === 'odd' ? 'нечётным' : 'чётным') + ' (оставить по ' + (other === 'odd' ? 'нечётным' : 'чётным') + ')') : null,
+        h('button', { class: 'btn ' + (c.week === 'all' ? 'ghost ' : '') + 'small', type: 'button', onclick: () => {
+          S.schedule = S.schedule.filter((x) => x.id !== c.id); menuFor = null; save(); renderPairs(); scheduleNotifications();
+        } }, c.week === 'all' ? 'На все недели' : 'Удалить'),
+        h('button', { class: 'btn ghost small', type: 'button', onclick: () => { menuFor = null; renderPairs(); } }, 'Отмена')));
+    }
+    return h('li', null,
+      h('span', { class: 'pair-no' }, c.pair),
+      h('div', null,
+        h('div', { class: 'cls-name' }, c.subject, own ? h('span', { class: 'badge' }, c.week && c.week !== 'all' ? 'своё · ' + PAR_RU[c.week] : 'своё') : null, c.note ? h('span', { class: 'badge' }, c.note) : null),
+        h('div', { class: 'cls-meta' }, C.fmt(c.start) + '–' + C.fmt(c.end) + (c.room ? ', ауд. ' + c.room : '') + (c.teacher ? ' · ' + c.teacher : ''))),
+      h('button', { class: 'icon-btn', type: 'button', title: own ? 'Удалить' : 'Скрыть', 'aria-label': (own ? 'Удалить: ' : 'Скрыть: ') + c.subject, onclick: () => { menuFor = key; renderPairs(); } }, '×'));
+  }
+  function quickAdd(di, par) {
+    const st = { pair: 1, week: 'all' };
+    const subj = h('input', { type: 'text', placeholder: 'Например, ВУЦ', maxlength: 80, autocomplete: 'off', 'aria-label': 'Предмет' });
+    const room = h('input', { type: 'text', placeholder: 'Аудитория', maxlength: 20, autocomplete: 'off', 'aria-label': 'Аудитория' });
+    const pairSel = h('select', { 'aria-label': 'Пара', onchange: (e) => { st.pair = +e.target.value; } }, S.settings.pairTimes.map((pt, i) => h('option', { value: i + 1 }, (i + 1) + ' пара, ' + pt[0])));
+    const wk = h('select', { 'aria-label': 'Какие недели', onchange: (e) => { st.week = e.target.value; } },
+      [['all', 'Каждую неделю'], [par, 'Только ' + PAR_PL[par] + ' (как эта)'], [par === 'odd' ? 'even' : 'odd', 'Только ' + PAR_PL[par === 'odd' ? 'even' : 'odd']]].map((o) => h('option', { value: o[0] }, o[1])));
+    setTimeout(() => subj.focus(), 0);
+    return h('form', { class: 'form', style: 'margin:6px 0 10px;padding:12px;border:1.5px dashed var(--line);border-radius:10px', onsubmit: (e) => {
+      e.preventDefault();
+      const name = subj.value.trim(); if (!name) { toast('Впиши название'); subj.focus(); return; }
+      S.schedule.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), day: di, pair: st.pair, subject: name, room: room.value.trim(), week: st.week });
+      addFor = null; save(); toast('Добавлено: ' + C.DAYS[di].toLowerCase() + ', ' + (st.week === 'all' ? 'каждую неделю' : PAR_PL[st.week] + ' недели')); renderPairs(); scheduleNotifications();
+    } }, subj, h('div', { class: 'grid2' }, pairSel, room), wk, h('div', { class: 'btn-row' }, h('button', { class: 'btn small', type: 'submit' }, 'Добавить'), h('button', { class: 'btn ghost small', type: 'button', onclick: () => { addFor = null; renderPairs(); } }, 'Отмена')));
   }
 
   function renderPairs() {
@@ -402,8 +436,8 @@
     const n = C.weekNumber(new Date(), S.settings.semesterStart);
     const par = C.weekParity(new Date(), S.settings.semesterStart);
     root.append(tulsuPanel());
-    if (allLessons().length || S.hidden.length) root.append(upcomingDays());
-    root.append(h('div', { class: 'panel' },
+    if (allLessons().length || S.hidden.length) root.append(twoWeeks());
+    if (!allLessons().length) root.append(h('div', { class: 'panel' },
       h('h2', null, 'Сейчас ' + (par === 'odd' ? 'нечётная' : 'чётная') + ' неделя'),
       h('p', { class: 'small muted', style: 'margin:0' }, n + '-я неделя семестра. ' + (S.tulsu ? 'Ниже можно добавить свои занятия вручную — например, секцию или курсы.' : 'Если группы нет на сайте ТулГУ, добавь пары вручную.'))));
 
@@ -416,8 +450,9 @@
       S.settings.pairTimes.map((p, i) => h('option', { value: i + 1 }, (i + 1) + ' пара, ' + p[0] + '–' + p[1])));
     const weekSel = h('select', { onchange: (e) => { f.week = e.target.value; } },
       ['all', 'odd', 'even'].map((k) => h('option', { value: k }, WEEK_NAME[k][0].toUpperCase() + WEEK_NAME[k].slice(1))));
-    root.append(h('form', {
-      class: 'panel form',
+    const formWrap = allLessons().length ? h('details', { class: 'panel' }, h('summary', { style: 'cursor:pointer;font-weight:700' }, 'Добавить пару через форму')) : null;
+    (formWrap || root).append(h('form', {
+      class: formWrap ? 'form' : 'panel form', style: formWrap ? 'margin-top:12px' : null,
       onsubmit: (e) => {
         e.preventDefault();
         const name = subj.value.trim();
@@ -431,6 +466,7 @@
     field('Предмет', subj),
     h('div', { class: 'grid2' }, field('Аудитория', room), field('Неделя', weekSel)),
     h('button', { class: 'btn', type: 'submit' }, 'Добавить пару')));
+    if (formWrap) root.append(formWrap);
 
     if (!S.schedule.length && !S.tulsu) {
       root.append(h('div', { class: 'panel' },
@@ -440,22 +476,6 @@
         } }, 'Заполнить примером')));
       return;
     }
-    C.DAYS.forEach((dname, di) => {
-      const list = S.schedule.filter((c) => c.day === di).sort((a, b) => a.pair - b.pair);
-      if (!list.length) return;
-      root.append(h('div', { class: 'panel day' }, h('h3', null, dname),
-        h('ul', { class: 'classes' }, list.map((c) => {
-          const tm = S.settings.pairTimes[c.pair - 1] || ['', ''];
-          return h('li', null,
-            h('span', { class: 'pair-no' }, c.pair),
-            h('div', null,
-              h('div', { class: 'cls-name' }, c.subject, c.week !== 'all' ? h('span', { class: 'badge' }, WEEK_NAME[c.week]) : null),
-              h('div', { class: 'cls-meta' }, tm[0] + '–' + tm[1] + (c.room ? ', ауд. ' + c.room : ''))),
-            h('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Удалить: ' + c.subject, title: 'Удалить', onclick: () => {
-              S.schedule = S.schedule.filter((x) => x !== c); save(); renderPairs(); scheduleNotifications();
-            } }, '×'));
-        }))));
-    });
   }
 
   /* ---------- ДОРОГА ---------- */
