@@ -1013,6 +1013,6 @@
     else if (!document.hidden && tab === 'home') renderHome();
   });
   if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
-    navigator.serviceWorker.register('sw.js').catch(() => { /* офлайн-режим недоступен */ });
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((r) => r.update()).catch(() => { /* офлайн-режим недоступен */ });
   }
 })();
