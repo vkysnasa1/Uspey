@@ -88,20 +88,24 @@ p { margin: 0 0 8px; }
 .plate.quiet .plate-lead { font: 600 22px/1.3 var(--display); }
 
 /* ---------- маршрут по шагам ---------- */
-.steps { list-style: none; margin: 0; padding: 0; position: relative; }
-.steps li { display: grid; grid-template-columns: 54px 30px 1fr; align-items: start; min-height: 44px; }
-.steps time { font-weight: 700; font-variant-numeric: tabular-nums; padding-top: 1px; }
-.steps .dot { position: relative; height: 100%; }
-.steps .dot::before {
-  content: ''; position: absolute; left: 5px; top: 6px; width: 12px; height: 12px;
-  border-radius: 50%; border: 3px solid var(--ink); background: var(--card);
-}
+.steps { list-style: none; margin: 0; padding: 0; }
+.steps li { display: grid; grid-template-columns: 54px 28px minmax(0, 1fr); align-items: start; }
+.steps li > span:last-child { padding-bottom: 14px; }
+.steps li:last-child > span:last-child { padding-bottom: 0; }
+.steps time { font-weight: 700; font-variant-numeric: tabular-nums; line-height: 24px; }
+/* точка и линия рисуются внутри одной колонки: линия от центра точки до низа строки */
+.steps .dot { position: relative; align-self: stretch; }
 .steps .dot::after {
-  content: ''; position: absolute; left: 10px; top: 20px; bottom: -6px; width: 2px; background: var(--line);
+  content: ''; position: absolute; left: 13px; top: 12px; bottom: -12px; width: 2px; background: var(--line); z-index: 0;
+}
+.steps .dot::before {
+  content: ''; position: absolute; left: 7px; top: 5px; width: 14px; height: 14px; box-sizing: border-box;
+  border-radius: 50%; border: 2.5px solid var(--ink); background: var(--card); z-index: 1;
 }
 .steps li:last-child .dot::after { display: none; }
-.steps li:first-child .dot::before { background: var(--plate); }
-.steps li:last-child .dot::before { border-radius: 3px; background: var(--ink); }
+.steps li:first-child .dot::before { background: var(--plate); border-color: var(--plate); }
+.steps li:last-child .dot::before { border-radius: 4px; background: var(--ink); }
+.steps li > span:last-child { line-height: 24px; }
 .backup { margin: 10px 0 0; padding-top: 10px; border-top: 1px dashed var(--line); font-size: 15px; }
 
 /* ---------- погода ---------- */
@@ -138,6 +142,10 @@ input[type=text], input[type=number], input[type=time], input[type=date], input[
   font-weight: 500;
 }
 textarea { min-height: 88px; resize: vertical; }
+/* iPhone: поля даты и времени иначе шире экрана и вылезают за карточку */
+input[type=time], input[type=date] { -webkit-appearance: none; appearance: none; display: block; min-width: 0; max-width: 100%; text-align: left; }
+input[type=time]::-webkit-date-and-time-value, input[type=date]::-webkit-date-and-time-value { text-align: left; margin: 0; }
+.grid2 > *, .grid3 > *, label.field { min-width: 0; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: end; }
 .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; align-items: end; }
 .form { display: grid; gap: 12px; }
@@ -163,7 +171,8 @@ textarea { min-height: 88px; resize: vertical; }
 .icon-btn { width: 40px; height: 40px; border-radius: 10px; border: 1.5px solid var(--line); background: transparent; cursor: pointer; font-size: 20px; line-height: 1; }
 .badge { display: inline-block; font-size: 12px; font-weight: 700; padding: 1px 7px; border-radius: 6px; border: 1.5px solid currentColor; margin-left: 6px; }
 
-.pairtimes { display: grid; grid-template-columns: 34px 1fr 1fr; gap: 8px; align-items: center; }
+.pairtimes { display: grid; grid-template-columns: 28px minmax(0, 1fr) minmax(0, 1fr); gap: 8px; align-items: center; }
+.pairtimes > * { min-width: 0; }
 
 /* ---------- таббар ---------- */
 .tabbar {

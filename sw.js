@@ -1,5 +1,5 @@
 /* Успею — service worker: приложение открывается без интернета */
-const VERSION = 'uspeyu-v3';
+const VERSION = 'uspeyu-v4';
 const SHELL = ['./', './index.html', './css/style.css', './js/core.js', './js/api.js', './js/app.js',
   './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png'];
 

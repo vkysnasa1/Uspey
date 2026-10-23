@@ -208,7 +208,7 @@
       count,
       h('div', { style: 'display:flex;gap:6px;flex-wrap:wrap' },
         t.delay.minutes ? h('span', { class: 'chip' }, '+' + t.delay.minutes + ' мин: ' + t.delay.reasons.join(', ')) : null,
-        t.traffic && t.traffic >= 1.3 ? h('span', { class: 'chip' }, 'пробки ×' + String(t.traffic).replace('.', ',')) : null,
+        t.balls >= 3 ? h('span', { class: 'chip' }, 'пробки ' + t.balls + ' ' + (t.balls === 1 ? 'балл' : t.balls < 5 ? 'балла' : 'баллов')) : null,
         t.margin ? h('span', { class: 'chip' }, 'запас ' + t.margin + ' мин') : null));
   }
 
@@ -808,7 +808,7 @@
         field('Время без пробок вручную, мин', numInput(c, 'manualMin', 1, 180, re), 'Используется, если маршрут не рассчитан.'),
         field('Пробки', h('select', { onchange: (e) => { c.traffic = e.target.value === 'auto' ? 'auto' : +e.target.value; save(); renderRoad(); re(); } },
           [['auto', 'Сам — по времени суток и дню недели'], [1, 'Всегда свободно'], [1.3, 'Всегда средние'], [1.6, 'Всегда сильные']].map((o) => h('option', { value: o[0], selected: String(c.traffic) === String(o[0]) }, o[1]))),
-          c.traffic === 'auto' ? 'Пробки по часам — ниже: в будни пик в 7:30 (дорога ≈ в 1,8 раза дольше), в 9:00 ещё ≈ 1,45, днём ≈ 1,3, в 17:30 снова пик, в субботу почти пусто. Автобусы тоже стоят в пробках, трамвай почти нет.' : null),
+          c.traffic === 'auto' ? 'Пробки по часам — ниже: в будни пик в 7:30 (9 баллов — дорога почти вдвое дольше), в 9:00 ещё 5, днём 3–4, в 17:30 снова 9, в субботу 1–3. Автобусы тоже стоят в пробках, трамвай почти нет.' : null),
         h('label', { style: 'display:flex;gap:10px;align-items:center;font-weight:600' },
           h('input', { type: 'checkbox', checked: c.parkingAuto !== false, onchange: (e) => { c.parkingAuto = e.target.checked; save(); renderRoad(); re(); } }),
           'Время на парковку считать самому'),
@@ -869,7 +869,7 @@
       } }, 'Удалить все данные')));
 
     root.append(h('div', { class: 'panel small muted' },
-      h('p', null, 'Успею — проект по дисциплине «Проектная деятельность», ТулГУ. Команда: Комерилов Григорий, Кузнецов Артем, Гончаров Иннокентий.'),
+      h('p', null, 'Успею — проект по дисциплине «Проектная деятельность», ТулГУ. Команда: Комерилов Григорий, Кузнецов Артем, Гончаров Иннокентий, Харитонов Илья.'),
       h('p', { style: 'margin:0' }, 'Погода — Open-Meteo, адреса — OpenStreetMap, маршрут — OSRM.')));
   }
 

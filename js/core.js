@@ -432,11 +432,11 @@
         leave = target - road - parking - margin;
       }
       return Object.assign(base, {
-        status: 'ok', leave, routeKm: r ? r.km : car.routeKm, traffic: f, parking, margin, drive,
+        status: 'ok', leave, routeKm: r ? r.km : car.routeKm, traffic: f, balls: Math.round((f - 1) / JAM_STEP), parking, margin, drive,
         steps: [
           { t: leave, text: out + ' и сесть в машину' + (margin ? ' (запас на погрешность ' + margin + ' мин)' : '') },
-          { t: leave + margin + road, text: 'Подъехать: ' + where + ' — без пробок ' + drive + ' мин, пробки ' + trafficLabel(f) + ' (×' + String(f).replace('.', ',') + ')' + (delay.minutes ? ', погода +' + delay.minutes : '') },
-          { t: leave + margin + road + parking, text: 'Найти место и дойти до аудитории — ~' + parking + ' мин' },
+          { t: leave + margin + road, text: 'Подъехать: ' + where + ' — ' + drive + ' мин без пробок' + (Math.round((f - 1) / JAM_STEP) > 0 ? ', пробки ' + trafficLabel(f) + ' (+' + (Math.round(drive * f) - drive) + ' мин)' : ', пробок нет') + (delay.minutes ? ', погода +' + delay.minutes + ' мин' : '') },
+          { t: leave + margin + road + parking, text: 'Найти место и дойти до аудитории — ~' + parking + ' мин' + (target < first.start ? ' (до начала ещё ' + (first.start - target) + ' мин запаса)' : '') },
           { t: first.start, text: aud },
         ],
       });
@@ -474,12 +474,12 @@
     const prev = fits.length > 1 ? fits[fits.length - 2] : null;
     const label = auto ? auto.label : bus.number ? 'Автобус № ' + bus.number : 'Автобус';
     return Object.assign(base, {
-      status: 'ok', leave, bus: busT, walkToBuilding: toBld, auto, traffic: ft, margin,
+      status: 'ok', leave, bus: busT, walkToBuilding: toBld, auto, traffic: ft, balls: Math.round((tf - 1) / JAM_STEP), margin,
       backup: prev == null ? null : { bus: prev, leave: prev - walkTo - reserve },
       steps: [
         { t: leave, text: out + (auto ? ', идти ' + walkTo + ' мин до остановки «' + auto.from + '»' : '') },
         { t: busT, text: label + ' отходит' + (auto ? ' (' + auto.stops + ' ост.)' : ' от остановки') },
-        { t: busT + ride, text: (auto ? 'Выйти на остановке «' + auto.to + '»' : 'Выйти у вуза') + (ft > 1.05 ? ', пробки ×' + String(ft).replace('.', ',') : '') + (delay.minutes ? ', погода +' + delay.minutes + ' мин' : '') },
+        { t: busT + ride, text: (auto ? 'Выйти на остановке «' + auto.to + '»' : 'Выйти у вуза') + (ride - baseRide - delay.minutes > 0 ? ', в пробках +' + (ride - baseRide - delay.minutes) + ' мин' : '') + (delay.minutes ? ', погода +' + delay.minutes + ' мин' : '') },
         { t: busT + ride + toBld, text: 'Дойти: ' + where + (toBld ? ', пешком ' + toBld + ' мин' : '') + (margin ? '. В запасе ещё ' + margin + ' мин на погрешность' : '') },
         { t: first.start, text: aud },
       ],
