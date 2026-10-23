@@ -16,6 +16,7 @@
     return {
       schedule: [],
       tulsu: null,
+      hidden: [],
       settings: {
         proxy: '',
         mode: 'bus', home: null, places: [], placeId: null, uni: Object.assign({}, UNI),
@@ -34,6 +35,7 @@
       if (s && typeof s === 'object') {
         if (Array.isArray(s.schedule)) d.schedule = s.schedule;
         if (s.tulsu && Array.isArray(s.tulsu.lessons)) d.tulsu = s.tulsu;
+        if (Array.isArray(s.hidden)) d.hidden = s.hidden;
         const st = s.settings || {};
         Object.assign(d.settings, st);
         d.settings.bus = Object.assign(defaults().settings.bus, st.bus);
@@ -56,7 +58,15 @@
     try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { toast('Не удалось сохранить: память браузера заполнена'); }
   }
 
-  const allLessons = () => S.schedule.concat(S.tulsu ? S.tulsu.lessons : []);
+  // скрытые занятия ТулГУ: чужая подгруппа, другая группа по языку и т. п.
+  function isHidden(l) {
+    if (!l.date) return false;
+    return S.hidden.some((x) => x.subject === l.subject && (!x.teacher || x.teacher === l.teacher) && (
+      x.kind === 'once' ? x.date === l.date && x.start === l.start
+        : x.kind === 'weekly' ? x.day === C.dayIndex(C.parseDate(l.date)) && x.start === l.start
+          : x.kind === 'teacher' ? true : false));
+  }
+  const allLessons = () => S.schedule.concat(S.tulsu ? S.tulsu.lessons.filter((l) => !isHidden(l)) : []);
 
   const W = { forecast: null, fetchedAt: null, stale: false, error: null, loading: false };
 
@@ -248,9 +258,10 @@
     const on = S.settings.notificationsOn && 'Notification' in window && Notification.permission === 'granted';
     return h('div', { class: 'panel' },
       h('h2', null, 'Напоминания'),
-      h('p', { class: 'small muted' }, 'Календарь телефона напомнит за ' + S.settings.notifyMin + ' мин до выхода, даже если сайт закрыт.'),
+      h('p', { class: 'small muted' }, 'Календарь напомнит за ' + S.settings.notifyMin + ' мин до выхода, даже если сайт закрыт.'),
       h('div', { class: 'btn-row' },
-        h('button', { class: 'btn', type: 'button', onclick: exportICS }, 'Добавить в календарь'),
+        h('button', { class: 'btn', type: 'button', onclick: () => openGoogleCal() }, 'В Google Календарь'),
+        h('button', { class: 'btn ghost', type: 'button', onclick: exportICS }, 'Вся неделя в календарь'),
         on ? null : h('button', { class: 'btn ghost', type: 'button', onclick: enableNotifications }, 'Включить уведомления')));
   }
 
@@ -329,24 +340,59 @@
       } }, 'Убрать расписание группы') : null);
   }
 
-  function tulsuDays() {
-    const box = h('div', { class: 'panel day' }, h('h2', null, 'Ближайшие пары'));
+  let menuFor = null;
+  function hideLesson(c, kind) {
+    const rule = { kind, subject: c.subject, start: c.start };
+    if (kind === 'once') rule.date = c.date;
+    if (kind === 'weekly') rule.day = C.dayIndex(C.parseDate(c.date));
+    rule.teacher = c.teacher || ''; // чтобы не скрыть пару другой подгруппы в то же время
+    S.hidden.push(rule); menuFor = null; save(); renderPairs(); scheduleNotifications();
+    toast(kind === 'once' ? 'Скрыто на ' + c.date.split('-').reverse().slice(0, 2).join('.') : 'Скрыто на все недели');
+  }
+  function upcomingDays() {
+    const box = h('div', { class: 'panel day' }, h('h2', null, 'Ближайшие пары'),
+      h('p', { class: 'hint' }, 'Пара не твоя (другая подгруппа, язык, физра)? Нажми × и скрой её — только в этот день или на все недели.'));
     const now = new Date();
     let shown = 0;
     for (let i = 0; i < 14 && shown < 6; i++) {
       const d = C.addDays(now, i);
-      const list = C.classesFor(d, S.tulsu.lessons, S.settings);
+      const list = C.classesFor(d, allLessons(), S.settings);
       if (!list.length) continue;
       shown++;
       box.append(h('h3', { style: 'margin-top:10px' }, dayLabel(d), h('span', { class: 'muted small' }, d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }))),
-        h('ul', { class: 'classes' }, list.map((c) => h('li', null,
-          h('span', { class: 'pair-no' }, c.pair),
-          h('div', null,
-            h('div', { class: 'cls-name' }, c.subject, c.note ? h('span', { class: 'badge' }, c.note) : null),
-            h('div', { class: 'cls-meta' }, C.fmt(c.start) + '–' + C.fmt(c.end) + (c.room ? ', ауд. ' + c.room : '') + (c.teacher ? ' · ' + c.teacher : ''))),
-          h('span', null)))));
+        h('ul', { class: 'classes' }, list.map((c) => {
+          const key = (c.date || C.ymd(d)) + c.start + c.subject;
+          const own = !c.date;
+          if (menuFor === key && !own) {
+            return h('li', { style: 'grid-template-columns:1fr' }, h('div', { class: 'form' },
+              h('b', null, 'Скрыть «' + c.subject + '»?'),
+              h('div', { class: 'btn-row' },
+                h('button', { class: 'btn small', type: 'button', onclick: () => hideLesson(c, 'weekly') }, 'Каждую неделю (' + C.DAYS_SHORT[C.dayIndex(d)] + ', ' + C.fmt(c.start) + ')'),
+                h('button', { class: 'btn ghost small', type: 'button', onclick: () => hideLesson(c, 'once') }, 'Только ' + d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }))),
+              c.teacher ? h('button', { class: 'btn ghost small', type: 'button', onclick: () => hideLesson(c, 'teacher') }, 'Все пары этого предмета у ' + c.teacher.split(' ')[0]) : null,
+              h('button', { class: 'btn ghost small', type: 'button', onclick: () => { menuFor = null; renderPairs(); } }, 'Отмена')));
+          }
+          return h('li', null,
+            h('span', { class: 'pair-no' }, c.pair),
+            h('div', null,
+              h('div', { class: 'cls-name' }, c.subject, own ? h('span', { class: 'badge' }, 'своё') : null, c.note ? h('span', { class: 'badge' }, c.note) : null),
+              h('div', { class: 'cls-meta' }, C.fmt(c.start) + '–' + C.fmt(c.end) + (c.room ? ', ауд. ' + c.room : '') + (c.teacher ? ' · ' + c.teacher : ''))),
+            h('button', { class: 'icon-btn', type: 'button', title: own ? 'Удалить на все недели' : 'Скрыть', 'aria-label': (own ? 'Удалить: ' : 'Скрыть: ') + c.subject, onclick: () => {
+              if (own) {
+                if (!confirm('Удалить «' + c.subject + '» на все недели?')) return;
+                S.schedule = S.schedule.filter((x) => !(x.day === c.day && x.pair === c.pair && x.subject === c.subject));
+                save(); renderPairs(); scheduleNotifications();
+              } else { menuFor = key; renderPairs(); }
+            } }, '×'));
+        })));
     }
     if (!shown) box.append(h('p', { class: 'muted' }, 'В ближайшие две недели пар нет.'));
+    if (S.hidden.length) {
+      box.append(h('details', { style: 'margin-top:12px' }, h('summary', { class: 'small', style: 'cursor:pointer;font-weight:700' }, 'Скрытые занятия: ' + S.hidden.length),
+        h('ul', { class: 'week' }, S.hidden.map((x) => h('li', null,
+          h('span', { class: 'small' }, x.subject + ' — ' + (x.kind === 'weekly' ? 'каждый ' + C.DAYS[x.day].toLowerCase() + ' в ' + C.fmt(x.start) : x.kind === 'once' ? x.date.split('-').reverse().join('.') + ' в ' + C.fmt(x.start) : 'у ' + x.teacher)),
+          h('button', { class: 'btn ghost small', type: 'button', onclick: () => { S.hidden = S.hidden.filter((y) => y !== x); save(); renderPairs(); scheduleNotifications(); } }, 'Вернуть'))))));
+    }
     return box;
   }
 
@@ -356,7 +402,7 @@
     const n = C.weekNumber(new Date(), S.settings.semesterStart);
     const par = C.weekParity(new Date(), S.settings.semesterStart);
     root.append(tulsuPanel());
-    if (S.tulsu) root.append(tulsuDays());
+    if (allLessons().length || S.hidden.length) root.append(upcomingDays());
     root.append(h('div', { class: 'panel' },
       h('h2', null, 'Сейчас ' + (par === 'odd' ? 'нечётная' : 'чётная') + ' неделя'),
       h('p', { class: 'small muted', style: 'margin:0' }, n + '-я неделя семестра. ' + (S.tulsu ? 'Ниже можно добавить свои занятия вручную — например, секцию или курсы.' : 'Если группы нет на сайте ТулГУ, добавь пары вручную.'))));
@@ -790,6 +836,8 @@
 
     root.append(h('div', { class: 'panel form' },
       h('h2', null, 'Данные'),
+      h('p', { class: 'hint' }, 'Данные хранятся отдельно на каждом устройстве. Чтобы на телефоне было то же самое (группа, свои пары, скрытые занятия, адреса, пробки), открой на нём ссылку переноса.'),
+      h('div', { class: 'btn-row' }, h('button', { class: 'btn', type: 'button', onclick: shareTransfer }, 'Перенести на другое устройство')),
       field('Свой прокси для расписания ТулГУ (необязательно)', h('input', { type: 'text', value: st.proxy, placeholder: 'https://mой-прокси.workers.dev/?url={url}', onchange: (e) => { st.proxy = e.target.value.trim(); save(); } }),
         'Сайт ТулГУ не отдаёт данные другим сайтам напрямую, поэтому расписание идёт через прокси. Без своего используется публичный.'),
       h('p', { class: 'hint' }, 'Всё хранится только на этом устройстве, на сервер ничего не отправляется.'),
@@ -805,6 +853,40 @@
       h('p', { style: 'margin:0' }, 'Погода — Open-Meteo, адреса — OpenStreetMap, маршрут — OSRM.')));
   }
 
+  // перенос настроек ссылкой: всё нужное кладём в адрес после #import=
+  function transferData() {
+    const st = S.settings;
+    return { v: 1, group: S.tulsu ? S.tulsu.group : null, schedule: S.schedule, hidden: S.hidden,
+      settings: { mode: st.mode, earlyMin: st.earlyMin, errorPct: st.errorPct, notifyMin: st.notifyMin, semesterStart: st.semesterStart, pairTimes: st.pairTimes,
+        jams: st.jams, uni: st.uni, places: st.places.map((x) => ({ id: x.id, label: x.label, name: x.name, lat: x.lat, lon: x.lon })), placeId: st.placeId,
+        bus: { auto: st.bus.auto, number: st.bus.number, walkTo: st.bus.walkTo, stopReserve: st.bus.stopReserve, ride: st.bus.ride, walkFrom: st.bus.walkFrom, useInterval: st.bus.useInterval, times: st.bus.times, first: st.bus.first, last: st.bus.last, every: st.bus.every },
+        car: { manualMin: st.car.manualMin, traffic: st.car.traffic, parkingAuto: st.car.parkingAuto, parking: st.car.parking } } };
+  }
+  const b64 = (s) => btoa(unescape(encodeURIComponent(s))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const unb64 = (s) => decodeURIComponent(escape(atob(s.replace(/-/g, '+').replace(/_/g, '/'))));
+  async function shareTransfer() {
+    const url = location.origin + location.pathname + '#import=' + b64(JSON.stringify(transferData()));
+    try { if (navigator.share) { await navigator.share({ title: 'Успею — мои настройки', url }); return; } } catch (e) { if (e.name === 'AbortError') return; }
+    try { await navigator.clipboard.writeText(url); toast('Ссылка скопирована — открой её на телефоне'); } catch (e) { prompt('Скопируй ссылку и открой на телефоне:', url); }
+  }
+  function applyTransfer(raw) {
+    try {
+      const d = JSON.parse(unb64(raw));
+      if (!d || d.v !== 1) throw new Error('bad');
+      if (!confirm('Загрузить настройки с другого устройства? Текущие свои пары и адреса заменятся.')) return;
+      S.schedule = Array.isArray(d.schedule) ? d.schedule : [];
+      S.hidden = Array.isArray(d.hidden) ? d.hidden : [];
+      const st = S.settings, ds = d.settings || {};
+      ['mode', 'earlyMin', 'errorPct', 'notifyMin', 'semesterStart', 'pairTimes', 'jams', 'uni'].forEach((k) => { if (ds[k] !== undefined) st[k] = ds[k]; });
+      Object.assign(st.bus, ds.bus || {}); Object.assign(st.car, ds.car || {});
+      st.places = ds.places || []; st.placeId = null; st.home = null;
+      save();
+      if (ds.placeId && st.places.find((x) => x.id === ds.placeId)) selectPlace(ds.placeId, true);
+      toast('Настройки перенесены');
+      if (d.group) loadTulsu(d.group);
+    } catch (e) { toast('Ссылка переноса повреждена'); }
+  }
+
   function importBackup(e) {
     const file = e.target.files[0];
     if (!file) return;
@@ -817,10 +899,30 @@
   }
 
   /* ---------- уведомления и календарь ---------- */
-  function exportICS() {
+  // Ближайшая поездка — сразу в Google Календарь (на телефоне откроется приложение «Календарь», останется нажать «Сохранить»)
+  function openGoogleCal() {
+    const t = C.upcomingTrips(new Date(), allLessons(), S.settings, W.forecast, 8).find((x) => x.status === 'ok');
+    if (!t) { toast('Нет рассчитанной поездки'); return; }
+    const z = (d) => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+    const start = C.atMinutes(t.date, t.leave), end = C.atMinutes(t.date, t.first.start);
+    const details = t.steps.map((s) => C.fmt(s.t) + ' — ' + s.text).join('\n') + '\n\nhttps://vkysnasa1.github.io/Uspey/';
+    const url = 'https://calendar.google.com/calendar/render?action=TEMPLATE&text=' + encodeURIComponent('Выходи в вуз — ' + C.fmt(t.leave)) +
+      '&dates=' + z(start) + '/' + z(end) + '&details=' + encodeURIComponent(details) + (t.building ? '&location=' + encodeURIComponent('ТулГУ, ' + t.building.addr) : '');
+    window.open(url, '_blank', 'noopener');
+  }
+  // Неделя поездок: на телефоне — через «Поделиться» прямо в приложение календаря, на компьютере — файлом
+  async function exportICS() {
     const trips = C.upcomingTrips(new Date(), allLessons(), S.settings, W.forecast, 8).filter((t) => t.status === 'ok');
     if (!trips.length) { toast('Нечего добавить: на неделю нет рассчитанных поездок'); return; }
-    download('uspeyu-nedelya.ics', C.buildICS(trips, S.settings.notifyMin), 'text/calendar;charset=utf-8');
+    const ics = C.buildICS(trips, S.settings.notifyMin);
+    try {
+      const file = new File([ics], 'uspeyu.ics', { type: 'text/calendar' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: 'Успею — поездки на неделю' });
+        return;
+      }
+    } catch (e) { if (e.name === 'AbortError') return; }
+    download('uspeyu-nedelya.ics', ics, 'text/calendar;charset=utf-8');
     toast('Файл скачан — открой его, чтобы добавить в календарь');
   }
 
@@ -879,7 +981,8 @@
 
   /* ---------- запуск ---------- */
   document.querySelectorAll('.tabbar button').forEach((b) => b.addEventListener('click', () => show(b.dataset.tab)));
-  window.addEventListener('hashchange', () => show(location.hash.slice(1)));
+  window.addEventListener('hashchange', () => { if (location.hash.startsWith('#import=')) { const raw = location.hash.slice(8); history.replaceState(null, '', location.pathname + '#home'); applyTransfer(raw); } show(location.hash.slice(1)); });
+  if (location.hash.startsWith('#import=')) { const raw = location.hash.slice(8); history.replaceState(null, '', location.pathname + '#home'); setTimeout(() => applyTransfer(raw), 300); }
   show(location.hash.slice(1) || 'home');
   loadWeather();
   if (S.tulsu && Date.now() - S.tulsu.fetchedAt > 12 * 3600 * 1000) loadTulsu(S.tulsu.group, true);
