@@ -399,14 +399,31 @@
     return bus.useInterval ? intervalTimes(bus.first, bus.last, bus.every) : parseTimes(bus.times);
   }
 
+  /* Опасность БПЛА: включается вручную на 12 часов. Транспорт может встать, связь — пропасть,
+     поэтому выходим раньше на заданный запас (пробки считаются как обычно). */
+  function droneMinutes(date, settings) {
+    const d = settings.drone;
+    if (!d || !d.until) return 0;
+    const dayStart = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+    return dayStart < d.until ? Math.max(0, +d.min || 20) : 0;
+  }
+
   function planTrip(date, schedule, settings, forecast) {
+    const p = planTripBase(date, schedule, settings, forecast);
+    const dm = p.drone;
+    if (dm && p.status === 'ok' && p.steps && p.steps[0]) p.steps[0].text += ' — запас на опасность БПЛА +' + dm + ' мин';
+    return p;
+  }
+
+  function planTripBase(date, schedule, settings, forecast) {
     const classes = classesFor(date, schedule, settings);
     if (!classes.length) return { status: 'no-classes', date };
     const first = classes[0];
-    const target = first.start - (+settings.earlyMin || 0);
+    const drone = droneMinutes(date, settings);
+    const target = first.start - (+settings.earlyMin || 0) - drone;
     const w = commuteWeather(forecast, date, target - 90, target);
     const delay = weatherDelay(w, settings.mode);
-    const base = { date, first, classes, target, weather: w, delay, mode: settings.mode };
+    const base = { date, first, classes, target, weather: w, delay, mode: settings.mode, drone };
 
     // корпус первой пары
     const bKey = buildingOf(first.room), bld = bKey ? BUILDINGS[bKey] : null;
@@ -546,7 +563,7 @@
     DEFAULT_PAIRS, DAYS, DAYS_SHORT, toMin, fmt, duration, parseTimes, intervalTimes,
     parseDate, ymd, addDays, dayIndex, weekNumber, weekParity, atMinutes,
     pairTime, classesFor, parseTulsu, describe, parseForecast, commuteWeather, conditions,
-    weatherDelay, clothing, warnings, BUILDINGS, buildingOf, distanceM, walkMinutes, transitPlan, trafficFactor, jamBalls, DEFAULT_JAMS, JAM_STEP, parkingMinutes, errorMargin, learnJams, busDepartures, planTrip, upcomingTrips, buildICS, icsFold,
+    weatherDelay, clothing, warnings, BUILDINGS, buildingOf, distanceM, walkMinutes, transitPlan, trafficFactor, jamBalls, DEFAULT_JAMS, JAM_STEP, parkingMinutes, errorMargin, learnJams, busDepartures, planTrip, upcomingTrips, droneMinutes, buildICS, icsFold,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = Core;
   else root.Core = Core;

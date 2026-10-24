@@ -213,3 +213,10 @@ details > summary::-webkit-details-marker { display: none; }
 .jam span { display: block; width: 100%; border-radius: 3px 3px 0 0; }
 .jam.sel { outline: 2px solid var(--ink); outline-offset: 1px; }
 .jam-axis { display: flex; justify-content: space-between; }
+
+/* опасность БПЛА */
+.chip.alarm { background: #B8351F; color: #fff; }
+.drone-btn { width: 100%; border-color: var(--alarm); color: var(--alarm); }
+.panel.drone { background: var(--alarm-bg); border: 2px solid var(--alarm); }
+.panel.drone h2 { color: var(--alarm); }
+.panel.drone select { background: var(--card); }

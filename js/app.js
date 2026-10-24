@@ -158,6 +158,7 @@
       return;
     }
     const now = new Date();
+    if (S.settings.drone && S.settings.drone.until && !droneActive()) { S.settings.drone.until = 0; save(); } // 12 часов прошли — режим выключается
     const trips = C.upcomingTrips(now, allLessons(), S.settings, W.forecast, 8);
     const lp = learnPanel(C.planTrip(now, allLessons(), S.settings, W.forecast));
     if (lp) root.append(lp);
@@ -172,6 +173,7 @@
     ensureRoutes(trips);
     const chips = placeChips(); if (chips) root.append(chips);
     root.append(hero(t, now));
+    root.append(dronePanel());
     if (t.status === 'ok') root.append(stepsPanel(t));
     root.append(weatherPanel(t));
     root.append(remindPanel());
@@ -209,7 +211,40 @@
       h('div', { style: 'display:flex;gap:6px;flex-wrap:wrap' },
         t.delay.minutes ? h('span', { class: 'chip' }, '+' + t.delay.minutes + ' мин: ' + t.delay.reasons.join(', ')) : null,
         t.balls >= 3 ? h('span', { class: 'chip' }, 'пробки ' + t.balls + ' ' + (t.balls === 1 ? 'балл' : t.balls < 5 ? 'балла' : 'баллов')) : null,
+        t.drone ? h('span', { class: 'chip alarm' }, 'БПЛА +' + t.drone + ' мин') : null,
         t.margin ? h('span', { class: 'chip' }, 'запас ' + t.margin + ' мин') : null));
+  }
+
+  /* ---- опасность БПЛА: ручной режим на 12 часов ---- */
+  const DRONE_HOURS = 12;
+  function droneActive() { const d = S.settings.drone; return !!(d && d.until && d.until > Date.now()); }
+  function setDrone(on) {
+    const d = S.settings.drone || (S.settings.drone = { min: 20, until: 0 });
+    if (on) {
+      // действует 12 часов, но не меньше, чем до конца дня ближайшей поездки (если включил с вечера)
+      const next = C.upcomingTrips(new Date(), allLessons(), Object.assign({}, S.settings, { drone: null }), W.forecast, 8)[0];
+      const endOfTrip = next ? new Date(next.date.getFullYear(), next.date.getMonth(), next.date.getDate(), 23, 59).getTime() : 0;
+      d.until = Math.max(Date.now() + DRONE_HOURS * 3600e3, endOfTrip);
+    } else d.until = 0;
+    save(); scheduleNotifications(); renderHome();
+    toast(on ? 'Выход сдвинут раньше на ' + d.min + ' мин' : 'Режим опасности выключен');
+  }
+  function dronePanel() {
+    const d = S.settings.drone || { min: 20 };
+    if (!droneActive()) {
+      return h('button', { class: 'btn ghost drone-btn', type: 'button', onclick: () => setDrone(true) },
+        h('span', { 'aria-hidden': 'true' }, '⚠'), 'Объявили опасность БПЛА');
+    }
+    const until = new Date(d.until);
+    const sel = h('select', { 'aria-label': 'Запас на опасность БПЛА', onchange: (e) => { S.settings.drone.min = +e.target.value; save(); scheduleNotifications(); renderHome(); } },
+      [10, 15, 20, 30, 45, 60].map((m) => h('option', { value: m, selected: m === +d.min }, '+' + m + ' мин')));
+    return h('div', { class: 'panel drone', role: 'alert' },
+      h('h2', null, 'Опасность БПЛА'),
+      h('p', null, 'Выход сдвинут раньше: автобусы могут встать, а мобильный интернет — пропасть. Маршрут и расписание уже сохранены на телефоне, напоминания из календаря сработают и без сети.'),
+      h('div', { class: 'grid2', style: 'margin-top:10px' },
+        h('label', { class: 'field' }, 'Запас по времени', sel),
+        h('button', { class: 'btn', type: 'button', onclick: () => setDrone(false) }, 'Отбой')),
+      h('p', { class: 'hint', style: 'margin-top:8px' }, 'Выключится сам ' + (sameDay(until, new Date()) ? 'в ' : until.toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' }) + ' в ') + C.fmt(until.getHours() * 60 + until.getMinutes()) + '. Официальные сигналы — в канале губернатора Тульской области и приложении МЧС.'));
   }
 
   function stepsPanel(t) {
