@@ -1,5 +1,5 @@
 /* Успею — service worker: приложение открывается без интернета */
-const VERSION = 'uspeyu-v4';
+const VERSION = 'uspeyu-v5';
 const SHELL = ['./', './index.html', './css/style.css', './js/core.js', './js/api.js', './js/app.js',
   './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png'];
 
@@ -13,6 +13,7 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.origin !== location.origin) return; // погода и карты — всегда из сети
+  if (url.pathname.includes('/data/')) return; // копия расписания — всегда свежая
   e.respondWith(
     fetch(e.request).then((res) => {
       const copy = res.clone();

@@ -88,35 +88,67 @@
       throw e.name === 'AbortError' ? new Error('нет ответа') : e;
     } finally { clearTimeout(timer); }
   }
-  // r.jina.ai отдаёт страницу с заголовком «Markdown Content:» — вырезаем сам JSON
-  function fromJina(text) {
-    const k = text.indexOf('Markdown Content:');
-    return k >= 0 ? text.slice(k + 17).trim() : text.trim();
+  // Достаём JSON из ответа прокси: r.jina.ai добавляет заголовок «Markdown Content:», другие — обёртку
+  function extractJSON(text) {
+    const t = String(text || '').trim();
+    try { return JSON.parse(t); } catch (e) { /* ищем JSON внутри */ }
+    const k = t.indexOf('Markdown Content:'), body = k >= 0 ? t.slice(k + 17) : t;
+    const a = body.search(/[\[{]/), z = Math.max(body.lastIndexOf(']'), body.lastIndexOf('}'));
+    if (a < 0 || z <= a) throw new Error('ответ не похож на данные');
+    return JSON.parse(body.slice(a, z + 1));
   }
 
+  // Все пути к сайту ТулГУ опрашиваются одновременно — берём первый нормальный ответ
+  function tulsuRoutes(target, proxy) {
+    const enc = encodeURIComponent(target);
+    const r = [[target, extractJSON]];
+    if (proxy) r.push([proxy.includes('{url}') ? proxy.replace('{url}', enc) : proxy.replace(/\/?$/, '/') + '?url=' + enc, extractJSON]);
+    r.push(['https://r.jina.ai/' + target, extractJSON]);
+    r.push(['https://api.allorigins.win/raw?url=' + enc, extractJSON]);
+    r.push(['https://api.allorigins.win/get?url=' + enc, (t) => extractJSON(JSON.parse(t).contents)]);
+    r.push(['https://corsproxy.io/?url=' + enc, extractJSON]);
+    r.push(['https://api.codetabs.com/v1/proxy/?quest=' + enc, extractJSON]);
+    return r;
+  }
   async function tulsuGet(path, proxy) {
     const target = TULSU + path;
-    const routes = [[target, (t) => t]];
-    if (proxy) routes.push([proxy.includes('{url}') ? proxy.replace('{url}', encodeURIComponent(target)) : proxy.replace(/\/?$/, '/') + '?url=' + encodeURIComponent(target), (t) => t]);
-    routes.push(['https://r.jina.ai/' + target, fromJina]);
-    routes.push(['https://api.allorigins.win/raw?url=' + encodeURIComponent(target), (t) => t]);
-    let lastErr;
-    for (const [url, pick] of routes) {
-      try { return JSON.parse(pick(await getText(url, 25000))); } catch (e) { lastErr = e; }
+    const tries = tulsuRoutes(target, proxy).map(([url, pick]) => getText(url, 25000).then((t) => {
+      const j = pick(t);
+      if (j == null || typeof j !== 'object') throw new Error('пустой ответ');
+      return j;
+    }));
+    try { return await Promise.any(tries); } catch (e) {
+      throw new Error('Сайт расписания ТулГУ сейчас недоступен ни напрямую, ни через прокси');
     }
-    throw new Error('Сайт расписания ТулГУ недоступен (' + (lastErr ? lastErr.message : 'нет связи') + '). Попробуй позже или укажи свой прокси в настройках');
+  }
+
+  // Копия расписания, которую GitHub обновляет сам каждые несколько часов (data/tulsu/<группа>.json)
+  async function tulsuCached(g) {
+    const res = await fetch('data/tulsu/' + encodeURIComponent(g) + '.json?t=' + Date.now(), { cache: 'no-store' });
+    if (!res.ok) throw new Error('нет копии');
+    return res.json();
   }
 
   // Всё расписание группы на семестр: { field, from, to, lessons }
-  async function tulsuSchedule(group, proxy) {
-    const g = String(group).trim();
+  async function tulsuLive(g, proxy) {
     const dates = await tulsuGet('GetDates.php?search_value=' + encodeURIComponent(g), proxy);
-    if (!dates || dates.error || !dates.MIN_DATE) throw new Error(dates && dates.error ? dates.error : 'Группа ' + g + ' не найдена');
+    if (!dates || dates.error || !dates.MIN_DATE) throw Object.assign(new Error(dates && dates.error ? dates.error : 'Группа ' + g + ' не найдена'), { final: true });
     const field = dates.SEARCH_FIELD || 'GROUP_P';
     const raw = await tulsuGet('GetSchedule.php?search_field=' + encodeURIComponent(field) + '&search_value=' + encodeURIComponent(g), proxy);
-    const lessons = root.Core.parseTulsu(raw);
+    return { field, from: dates.MIN_DATE, to: dates.MAX_DATE, raw };
+  }
+  async function tulsuSchedule(group, proxy) {
+    const g = String(group).trim();
+    let r, cached = false;
+    try { r = await tulsuLive(g, proxy); } catch (e) {
+      if (e.final) throw e;
+      try { r = await tulsuCached(g); cached = true; } catch (e2) {
+        throw new Error(e.message + '. Попробуй позже или укажи свой прокси в настройках');
+      }
+    }
+    const lessons = root.Core.parseTulsu(r.raw);
     if (!lessons.length) throw new Error('Для группы ' + g + ' расписание пустое');
-    return { field, from: dates.MIN_DATE, to: dates.MAX_DATE, lessons };
+    return { field: r.field, from: r.from, to: r.to, lessons, cachedAt: cached ? r.at : null };
   }
 
   async function tulsuSuggest(term, proxy) {

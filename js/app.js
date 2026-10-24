@@ -312,7 +312,7 @@
       const r = await A.tulsuSchedule(g, S.settings.proxy);
       S.tulsu = { group: g, field: r.field, from: r.from, to: r.to, lessons: r.lessons, fetchedAt: Date.now() };
       save();
-      if (!silent) toast('Загружено занятий: ' + r.lessons.length);
+      if (!silent) toast('Загружено занятий: ' + r.lessons.length + (r.cachedAt ? ' (копия от ' + new Date(r.cachedAt).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) + ')' : ''));
       scheduleNotifications();
     } catch (e) {
       if (!silent) toast(e.message);
