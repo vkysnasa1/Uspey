@@ -211,11 +211,11 @@
       h('div', { style: 'display:flex;gap:6px;flex-wrap:wrap' },
         t.delay.minutes ? h('span', { class: 'chip' }, '+' + t.delay.minutes + ' мин: ' + t.delay.reasons.join(', ')) : null,
         t.balls >= 3 ? h('span', { class: 'chip' }, 'пробки ' + t.balls + ' ' + (t.balls === 1 ? 'балл' : t.balls < 5 ? 'балла' : 'баллов')) : null,
-        t.drone ? h('span', { class: 'chip alarm' }, 'БПЛА +' + t.drone + ' мин') : null,
+        t.drone ? h('span', { class: 'chip alarm' }, 'опасность +' + t.drone + ' мин') : null,
         t.margin ? h('span', { class: 'chip' }, 'запас ' + t.margin + ' мин') : null));
   }
 
-  /* ---- опасность БПЛА: ручной режим на 12 часов ---- */
+  /* ---- ракетная опасность: ручной режим на 12 часов ---- */
   const DRONE_HOURS = 12;
   function droneActive() { const d = S.settings.drone; return !!(d && d.until && d.until > Date.now()); }
   function setDrone(on) {
@@ -233,14 +233,14 @@
     const d = S.settings.drone || { min: 20 };
     if (!droneActive()) {
       return h('button', { class: 'btn ghost drone-btn', type: 'button', onclick: () => setDrone(true) },
-        h('span', { 'aria-hidden': 'true' }, '⚠'), 'Объявили опасность БПЛА');
+        h('span', { 'aria-hidden': 'true' }, '⚠'), 'Объявили ракетную опасность');
     }
     const until = new Date(d.until);
-    const sel = h('select', { 'aria-label': 'Запас на опасность БПЛА', onchange: (e) => { S.settings.drone.min = +e.target.value; save(); scheduleNotifications(); renderHome(); } },
+    const sel = h('select', { 'aria-label': 'Запас на ракетную опасность', onchange: (e) => { S.settings.drone.min = +e.target.value; save(); scheduleNotifications(); renderHome(); } },
       [10, 15, 20, 30, 45, 60].map((m) => h('option', { value: m, selected: m === +d.min }, '+' + m + ' мин')));
     return h('div', { class: 'panel drone', role: 'alert' },
-      h('h2', null, 'Опасность БПЛА'),
-      h('p', null, 'Выход сдвинут раньше: автобусы могут встать, а мобильный интернет — пропасть. Маршрут и расписание уже сохранены на телефоне, напоминания из календаря сработают и без сети.'),
+      h('h2', null, 'Ракетная опасность'),
+      h('p', null, 'Выход сдвинут раньше: автобусы могут встать, а мобильный интернет — пропасть. При сигнале «Ракетная опасность» уйди в укрытие и не выходи до отбоя. Маршрут и расписание уже сохранены на телефоне, напоминания из календаря сработают и без сети.'),
       h('div', { class: 'grid2', style: 'margin-top:10px' },
         h('label', { class: 'field' }, 'Запас по времени', sel),
         h('button', { class: 'btn', type: 'button', onclick: () => setDrone(false) }, 'Отбой')),

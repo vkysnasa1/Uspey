@@ -235,7 +235,7 @@ test('пробки: обучение на реальной поездке', () =
   assert.equal(C.jamBalls(new Date(2026, 9, 31), 8 * 60 + 40, learned), C.jamBalls(new Date(2026, 9, 31), 8 * 60 + 40, null), 'суббота не тронута');
 });
 
-test('опасность БПЛА: выход раньше на запас, пробки те же', () => {
+test('ракетная опасность: выход раньше на запас, пробки те же', () => {
   const tue = new Date(2026, 9, 27, 21, 0);
   const base = { mode: 'car', earlyMin: 10, errorPct: 0, semesterStart: '2026-09-01', pairTimes: C.DEFAULT_PAIRS,
     car: { manualMin: 20, traffic: 'auto', parkingAuto: true, routes: {} }, bus: {} };
@@ -245,7 +245,7 @@ test('опасность БПЛА: выход раньше на запас, пр
   const alarm = C.planTrip(tue, lesson, Object.assign({}, base, { drone: { min: 20, until } }), null);
   assert.equal(alarm.drone, 20);
   assert.ok(calm.leave - alarm.leave >= 18 && calm.leave - alarm.leave <= 24, calm.leave + ' → ' + alarm.leave);
-  assert.match(alarm.steps[0].text, /БПЛА \+20 мин/);
+  assert.match(alarm.steps[0].text, /ракетную опасность \+20 мин/);
   // на следующий день режим уже не действует
   const wed = C.planTrip(new Date(2026, 9, 28), [{ date: '2026-10-28', start: 600, end: 695, subject: 'X', room: 'Гл.-104' }], Object.assign({}, base, { drone: { min: 20, until } }), null);
   assert.equal(wed.drone, 0);

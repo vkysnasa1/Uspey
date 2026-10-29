@@ -399,7 +399,7 @@
     return bus.useInterval ? intervalTimes(bus.first, bus.last, bus.every) : parseTimes(bus.times);
   }
 
-  /* Опасность БПЛА: включается вручную на 12 часов. Транспорт может встать, связь — пропасть,
+  /* Ракетная опасность: включается вручную на 12 часов. Транспорт может встать, связь — пропасть,
      поэтому выходим раньше на заданный запас (пробки считаются как обычно). */
   function droneMinutes(date, settings) {
     const d = settings.drone;
@@ -411,7 +411,7 @@
   function planTrip(date, schedule, settings, forecast) {
     const p = planTripBase(date, schedule, settings, forecast);
     const dm = p.drone;
-    if (dm && p.status === 'ok' && p.steps && p.steps[0]) p.steps[0].text += ' — запас на опасность БПЛА +' + dm + ' мин';
+    if (dm && p.status === 'ok' && p.steps && p.steps[0]) p.steps[0].text += ' — запас на ракетную опасность +' + dm + ' мин';
     return p;
   }
 
