@@ -6,12 +6,20 @@
 // и тексты напоминаний.
 //
 // Переменные окружения (Settings → Variables): BOT_TOKEN (секрет от @BotFather),
-// SETUP_KEY (любая длинная строка, секрет), ORIGIN (адрес сайта, например https://vkysnasa1.github.io).
+// SETUP_KEY (секрет: 32+ латинских букв и цифр), ORIGIN (адрес сайта, например https://vkysnasa1.github.io).
+//
+// Что защищено и как:
+// - BOT_TOKEN живёт только в секретах Cloudflare. Его нет ни в репозитории, ни в приложении, ни в ответах воркера.
+// - Сообщения от Telegram принимаются, только если в заголовке пришёл SETUP_KEY: его знают лишь Telegram и воркер,
+//   поддельный /start с чужим chat_id не пройдёт.
+// - Ключ устройства — 144 случайных бита, подобрать нельзя. Кто его украдёт, сможет только поменять
+//   напоминания в твоём же чате: прочитать ничего нельзя, ссылки из текста вырезаются, запросов не больше 60 в час.
 // Привязка базы: DB → D1 с таблицами из schema.sql. Cron: "* * * * *".
 
 const MAX_REMINDERS = 40;               // на одно устройство: ~2 в день на 8 дней вперёд
 const MAX_AHEAD = 9 * 24 * 3600 * 1000; // дальше 9 дней не храним
 const LATE = 15 * 60 * 1000;            // если бот проспал больше 15 минут, старое напоминание уже не нужно
+const SYNC_PER_HOUR = 60;               // приложение шлёт пару запросов в час, больше — уже чьи-то фокусы
 
 export default {
   async fetch(request, env) {
@@ -25,17 +33,18 @@ export default {
     if (request.method === 'OPTIONS') return new Response(null, { headers: cors });
 
     try {
-      // Сообщения от Telegram. Путь с секретом, чтобы чужие не слали поддельные апдейты
-      if (url.pathname === '/tg/' + env.SETUP_KEY && request.method === 'POST') {
+      // Сообщения от Telegram. Настоящий Telegram кладёт SETUP_KEY в заголовок, остальных не пускаем
+      if (url.pathname === '/tg' && request.method === 'POST') {
+        if (!env.SETUP_KEY || !safeEqual(request.headers.get('X-Telegram-Bot-Api-Secret-Token') || '', env.SETUP_KEY)) return new Response('forbidden', { status: 403 });
         await onUpdate(await request.json(), env);
         return new Response('ok');
       }
 
       // Один раз после развёртывания: /setup?key=SETUP_KEY — бот узнаёт, куда слать сообщения
       if (url.pathname === '/setup') {
-        if (url.searchParams.get('key') !== env.SETUP_KEY) return json({ error: 'неверный ключ' }, 403);
-        const hook = url.origin + '/tg/' + env.SETUP_KEY;
-        const r = await tg(env, 'setWebhook', { url: hook, allowed_updates: ['message'] });
+        if (!/^[A-Za-z0-9_-]{32,256}$/.test(env.SETUP_KEY || '')) return json({ error: 'SETUP_KEY должен быть из 32+ латинских букв, цифр, _ или -' }, 500);
+        if (!safeEqual(url.searchParams.get('key') || '', env.SETUP_KEY)) return json({ error: 'неверный ключ' }, 403);
+        const r = await tg(env, 'setWebhook', { url: url.origin + '/tg', secret_token: env.SETUP_KEY, allowed_updates: ['message'], drop_pending_updates: true });
         await tg(env, 'setMyCommands', { commands: [{ command: 'stop', description: 'Больше не напоминать' }] });
         return json({ ok: r.ok, description: r.description });
       }
@@ -56,16 +65,20 @@ export default {
         const body = await request.json();
         const token = cleanToken(body.token);
         if (!token) return json({ error: 'нет ключа' }, 400);
-        const link = await env.DB.prepare('SELECT chat_id FROM links WHERE token = ?').bind(token).first();
+        const link = await env.DB.prepare('SELECT chat_id, sync_count, sync_window FROM links WHERE token = ?').bind(token).first();
         if (!link) return json({ linked: false }, 404);
         const now = Date.now();
+        const fresh = now - (link.sync_window || 0) > 3600 * 1000;
+        if (!fresh && (link.sync_count || 0) >= SYNC_PER_HOUR) return json({ error: 'слишком часто, попробуй через час' }, 429);
+        await env.DB.prepare('UPDATE links SET sync_count = ?, sync_window = ? WHERE token = ?')
+          .bind(fresh ? 1 : (link.sync_count || 0) + 1, fresh ? now : link.sync_window, token).run();
         const list = (Array.isArray(body.reminders) ? body.reminders : [])
           .filter((r) => r && Number.isFinite(+r.at) && +r.at > now && +r.at < now + MAX_AHEAD && typeof r.text === 'string')
           .slice(0, MAX_REMINDERS);
         // Старые напоминания устройства заменяются новыми целиком: время выхода могло сдвинуться
         await env.DB.batch([
           env.DB.prepare('DELETE FROM reminders WHERE token = ?').bind(token),
-          ...list.map((r) => env.DB.prepare('INSERT INTO reminders (token, at, text) VALUES (?, ?, ?)').bind(token, Math.round(+r.at), r.text.slice(0, 1500))),
+          ...list.map((r) => env.DB.prepare('INSERT INTO reminders (token, at, text) VALUES (?, ?, ?)').bind(token, Math.round(+r.at), cleanText(r.text))),
         ]);
         return json({ linked: true, count: list.length });
       }
@@ -126,6 +139,24 @@ async function onUpdate(update, env) {
     ]);
     await tg(env, 'sendMessage', { chat_id: chat, text: 'Больше не напоминаю. Включить снова можно в настройках «Успею».' });
   }
+}
+
+// Текст напоминания: без ссылок и @упоминаний, чтобы укравший ключ не мог прислать от имени бота фишинг
+function cleanText(t) {
+  return String(t)
+    .replace(/(https?:\/\/|www\.)\S+/gi, '')
+    .replace(/\b[a-z0-9-]+(\.[a-z0-9-]+)*\.(ru|su|com|org|net|me|io|co|xyz|info|site|online|link|app|dev|top|pro|cc|ly|gl|gg|to|tk)\b\S*/gi, '')
+    .replace(/[\p{L}\d-]+\.(рф|рус|онлайн|сайт)(?![\p{L}\d])\S*/giu, '')
+    .replace(/@[A-Za-z0-9_]{4,}/g, '')
+    .slice(0, 1500);
+}
+
+// Сравнение секретов за одинаковое время, чтобы его нельзя было подобрать по скорости ответа
+function safeEqual(a, b) {
+  if (a.length !== b.length) return false;
+  let d = 0;
+  for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return d === 0;
 }
 
 // Ключ устройства: 16–64 символа, как разрешает параметр start у Telegram

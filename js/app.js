@@ -998,7 +998,7 @@
         'Сайт ТулГУ не отдаёт данные другим сайтам напрямую, поэтому расписание идёт через прокси. Без своего используется публичный.'),
       h('p', { class: 'hint' }, st.tg.linked ? 'Всё хранится на этом устройстве. Наружу уходит только время выхода и название пары, если подключён Telegram' : 'Всё хранится только на этом устройстве, на сервер ничего не уходит'),
       h('div', { class: 'btn-row' },
-        h('button', { class: 'btn ghost', type: 'button', onclick: () => download('uspeyu-backup.json', JSON.stringify(S, null, 2), 'application/json') }, 'Сохранить копию'),
+        h('button', { class: 'btn ghost', type: 'button', onclick: () => download('uspeyu-backup.json', JSON.stringify(backupData(), null, 2), 'application/json') }, 'Сохранить копию'),
         h('label', { class: 'btn ghost' }, 'Загрузить копию', h('input', { type: 'file', accept: 'application/json,.json', hidden: true, onchange: importBackup }))),
       h('button', { class: 'btn ghost', type: 'button', onclick: () => {
         if (confirm('Удалить расписание и настройки с этого устройства?')) { localStorage.removeItem(KEY); S = load(); toast('Данные удалены'); show('home'); loadWeather(); }
@@ -1045,6 +1045,12 @@
     } catch (e) { toast('Ссылка переноса повреждена'); }
   }
 
+  // В файл копии ключ Telegram не кладём: файл легко переслать, а с ключом можно менять твои напоминания
+  function backupData() {
+    const copy = JSON.parse(JSON.stringify(S));
+    copy.settings.tg = Object.assign({}, copy.settings.tg, { token: '', linked: false, syncedAt: 0, error: '' });
+    return copy;
+  }
   function importBackup(e) {
     const file = e.target.files[0];
     if (!file) return;
