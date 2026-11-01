@@ -72,6 +72,36 @@
   }
 
 
+  // Пешком по реальным тротуарам (OSRM-пешеход от FOSSGIS). Минуты считаем сами из длины пути:
+  // 75 м/мин — с переходами и светофорами, как и везде в приложении
+  async function walkRoute(from, to) {
+    const url = 'https://routing.openstreetmap.de/routed-foot/route/v1/driving/' + from.lon + ',' + from.lat + ';' + to.lon + ',' + to.lat + '?overview=false';
+    const json = await getJSON(url, 10000, 1);
+    if (json.code !== 'Ok' || !json.routes || !json.routes[0]) throw new Error('Пешеходный маршрут не найден');
+    return { minutes: Math.max(1, Math.round(json.routes[0].distance / 75)), m: Math.round(json.routes[0].distance) };
+  }
+
+  /* ---- Telegram-бот напоминаний (папка bot/, свой Cloudflare Worker) ---- */
+  async function botCall(base, path, body) {
+    const url = base.replace(/\/+$/, '') + path;
+    const opts = body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {};
+    const ctrl = new AbortController(), timer = setTimeout(() => ctrl.abort(), 12000);
+    try {
+      const res = await fetch(url, Object.assign(opts, { signal: ctrl.signal }));
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok && res.status !== 404) throw new Error(json.error || 'бот ответил ошибкой ' + res.status);
+      return json;
+    } catch (e) {
+      throw e.name === 'AbortError' ? new Error('бот не ответил') : e;
+    } finally { clearTimeout(timer); }
+  }
+  const bot = {
+    info: (base) => botCall(base, '/info'),
+    status: (base, token) => botCall(base, '/status?token=' + encodeURIComponent(token)),
+    sync: (base, token, reminders) => botCall(base, '/sync', { token, reminders }),
+    unlink: (base, token) => botCall(base, '/unlink', { token }),
+  };
+
   /* ---- Расписание ТулГУ ----
      Сайт tulsu.ru не разрешает запросы с других сайтов (нет CORS), поэтому пробуем по очереди:
      напрямую → свой прокси из настроек → r.jina.ai → api.allorigins.win. */
@@ -198,5 +228,5 @@
     return { routes, at: Date.now() };
   }
 
-  root.Api = { forecast, geocode, reverse, driveMinutes, tulsuSchedule, tulsuSuggest, transitNetwork };
+  root.Api = { forecast, geocode, reverse, driveMinutes, walkRoute, bot, tulsuSchedule, tulsuSuggest, transitNetwork };
 })(window);

@@ -1,0 +1,20 @@
+# Для тех, кто разворачивает через командную строку: npx wrangler deploy
+# (через сайт dash.cloudflare.com этот файл не нужен, см. README)
+name = "uspey-bot"
+main = "worker.js"
+compatibility_date = "2026-10-01"
+
+[triggers]
+crons = ["* * * * *"]
+
+[vars]
+ORIGIN = "https://vkysnasa1.github.io"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "uspey-bot"
+database_id = "ВСТАВЬ_ID_ИЗ_wrangler_d1_create"
+
+# Секреты не пишем в файл, а задаём командами:
+#   npx wrangler secret put BOT_TOKEN
+#   npx wrangler secret put SETUP_KEY

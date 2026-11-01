@@ -250,3 +250,31 @@ test('ракетная опасность: выход раньше на запа
   const wed = C.planTrip(new Date(2026, 9, 28), [{ date: '2026-10-28', start: 600, end: 695, subject: 'X', room: 'Гл.-104' }], Object.assign({}, base, { drone: { min: 20, until } }), null);
   assert.equal(wed.drone, 0);
 });
+
+test('интервал по маршруту: у найденного маршрута свой интервал, у остальных общий', () => {
+  const bus = { useInterval: true, first: '07:00', last: '08:00', every: 30, perRoute: { 'Троллейбус № 8': { first: '07:00', last: '07:20', every: 10 } } };
+  assert.deepEqual(C.busDepartures(bus, 'Троллейбус № 8').map(C.fmt), ['7:00', '7:10', '7:20']);
+  assert.deepEqual(C.busDepartures(bus, 'Автобус № 16').map(C.fmt), ['7:00', '7:30', '8:00']);
+  assert.deepEqual(C.busDepartures(bus).map(C.fmt), ['7:00', '7:30', '8:00']);
+});
+
+test('план транспорта запоминает координаты остановок для пешего пути', () => {
+  const net = { routes: [{ type: 'trolleybus', ref: '8', stops: [
+    { name: 'Дом', lat: 54.180, lon: 37.600 }, { name: 'Середина', lat: 54.175, lon: 37.595 }, { name: 'ТулГУ', lat: 54.1672, lon: 37.5868 }] }] };
+  const p = C.transitPlan(net, { lat: 54.1801, lon: 37.6002 }, C.BUILDINGS['Гл']);
+  assert.equal(p.label, 'Троллейбус № 8');
+  assert.deepEqual(p.fromPt, { lat: 54.180, lon: 37.600 });
+  assert.deepEqual(p.toPt, { lat: 54.1672, lon: 37.5868 });
+});
+
+test('напоминания для бота: два на поездку, только будущие, без восклицаний', () => {
+  const trips = [C.planTrip(MON, schedule, settings(), forecastWith({}))];
+  const leaveAt = C.atMinutes(MON, trips[0].leave).getTime();
+  const all = C.botReminders(trips, 10, leaveAt - 3600e3);
+  assert.equal(all.length, 2);
+  assert.equal(all[0].at, leaveAt - 600e3);
+  assert.match(all[0].text, /^Через 10 мин выходить \(в 8:06\)/);
+  assert.match(all[1].text, /^Пора выходить\n1 пара в 9:00: Матанализ/);
+  assert.ok(!all.some((r) => r.text.includes('!')));
+  assert.equal(C.botReminders(trips, 10, leaveAt - 60e3).length, 1); // первое уже прошло
+});

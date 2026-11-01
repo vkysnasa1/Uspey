@@ -4,6 +4,9 @@
   const C = window.Core, A = window.Api;
   const KEY = 'uspeyu.v1';
   const UNI = { name: 'ТулГУ, главный корпус (пр. Ленина, 92)', lat: 54.1669, lon: 37.5870 };
+  // Адрес своего бота из папки bot/ после развёртывания, например 'https://uspey-bot.ИМЯ.workers.dev'.
+  // Пока пусто, кнопка «Напоминать в Telegram» появляется только если адрес вписан в настройках
+  const BOT_URL = '';
 
   /* ---------- состояние ---------- */
   function semesterDefault() {
@@ -23,7 +26,8 @@
         earlyMin: 10, errorPct: 10, notifyMin: 10, notificationsOn: false,
         semesterStart: semesterDefault(),
         pairTimes: C.DEFAULT_PAIRS.map((p) => p.slice()),
-        bus: { auto: true, network: null, plans: {}, number: '', walkTo: 7, stopReserve: 2, ride: 25, walkFrom: 5, useInterval: true, times: '', first: '06:00', last: '22:30', every: 15 },
+        bus: { auto: true, network: null, plans: {}, number: '', walkTo: 7, stopReserve: 2, ride: 25, walkFrom: 5, useInterval: true, times: '', first: '06:00', last: '22:30', every: 15, perRoute: {} },
+        tg: { url: '', token: '', linked: false, syncedAt: 0, error: '' },
         car: { manualMin: 20, traffic: 'auto', parkingAuto: true, parking: 7, routeMin: null, routeKm: null, routeFor: '', routes: {} },
       },
     };
@@ -41,6 +45,7 @@
         Object.assign(d.settings, st);
         d.settings.bus = Object.assign(defaults().settings.bus, st.bus);
         d.settings.car = Object.assign(defaults().settings.car, st.car);
+        d.settings.tg = Object.assign(defaults().settings.tg, st.tg);
         if (!Array.isArray(d.settings.places)) d.settings.places = [];
         if (d.settings.home && !d.settings.places.length) { // старые сохранения: один адрес → «Дом»
           const id = 'p' + Date.now().toString(36);
@@ -55,6 +60,14 @@
     return d;
   }
   let S = load();
+  // Начало семестра (от него считается чётность своих пар) берём из расписания ТулГУ,
+  // пока человек не поставил дату сам. Весной это точнее, чем угадывать «1 февраля»
+  function semesterFromTulsu() {
+    const st = S.settings, from = S.tulsu && S.tulsu.from;
+    if (st.semesterManual || !C.parseDate(from)) return;
+    st.semesterStart = from;
+  }
+  if (!S.settings.semesterManual && /-(09-01|02-01)$/.test(S.settings.semesterStart)) semesterFromTulsu();
   function save() {
     try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { toast('Не удалось сохранить: память браузера заполнена'); }
   }
@@ -93,6 +106,20 @@
     if (kid == null || kid === false) return;
     if (Array.isArray(kid)) { kid.forEach((k) => append(el, k)); return; }
     el.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+  }
+  // Иконки lucide (lucide.dev, ISC): один набор, 18 px, линия 1.5, цвет текста
+  const ICONS = {
+    pencil: '<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/>',
+    x: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+    eyeOff: '<path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"/><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"/><path d="m2 2 20 20"/>',
+    alert: '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+    plus: '<path d="M5 12h14"/><path d="M12 5v14"/>',
+  };
+  function icon(name) {
+    const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    s.setAttribute('viewBox', '0 0 24 24'); s.setAttribute('class', 'ico'); s.setAttribute('aria-hidden', 'true');
+    s.innerHTML = ICONS[name];
+    return s;
   }
   let toastTimer;
   function toast(msg) {
@@ -150,9 +177,9 @@
     root.replaceChildren();
     if (!allLessons().length) {
       root.append(h('div', { class: 'plate quiet' },
-        h('p', { class: 'plate-lead' }, 'Введи номер группы — и я посчитаю, во сколько выходить'),
-        h('p', { class: 'muted', style: 'margin-top:8px' }, 'Расписание загрузится с сайта ТулГУ и сохранится на этом устройстве.'),
-        h('div', { class: 'btn-row', style: 'margin-top:14px' },
+        h('p', { class: 'plate-lead' }, 'Введи номер группы, и я посчитаю, во сколько выходить'),
+        h('p', { class: 'muted', style: 'margin-top:8px' }, 'Расписание загрузится с сайта ТулГУ и останется на этом устройстве'),
+        h('div', { class: 'btn-row', style: 'margin-top:16px' },
           h('button', { class: 'btn', type: 'button', onclick: () => show('pairs') }, 'Указать группу'))));
       root.append(weatherPanel(null));
       return;
@@ -165,7 +192,7 @@
     if (!trips.length) {
       root.append(h('div', { class: 'plate quiet' },
         h('p', { class: 'plate-lead' }, 'На ближайшую неделю пар нет'),
-        h('p', { class: 'muted', style: 'margin-top:8px' }, 'Проверь расписание и дату начала семестра — от неё считается чётность недели.')));
+        h('p', { class: 'muted', style: 'margin-top:8px' }, 'Проверь расписание и дату начала семестра: от неё считается чётность недели')));
       root.append(weatherPanel(null));
       return;
     }
@@ -184,8 +211,8 @@
     const pairLine = 'к ' + t.first.pair + ' паре в ' + C.fmt(t.first.start) + (t.first.subject ? ', ' + t.first.subject : '');
     if (t.status !== 'ok') {
       const msg = {
-        'no-route': ['Укажи, откуда едешь', 'Нужен адрес дома или примерное время в пути на машине.', 'road'],
-        'no-bus': ['Добавь расписание автобуса', 'Укажи время отправления с твоей остановки или интервал движения.', 'road'],
+        'no-route': ['Укажи, откуда едешь', 'Нужен адрес дома или примерное время в пути на машине', 'road'],
+        'no-bus': ['Добавь расписание автобуса', 'Укажи время отправления с твоей остановки или интервал движения', 'road'],
         'no-bus-fits': ['Ни один автобус не успевает', 'Самый ранний автобус в ' + C.fmt(t.earliest || 0) + ' приедет позже, чем нужно. Проверь время в пути или расписание.', 'road'],
       }[t.status];
       return h('div', { class: 'plate quiet' },
@@ -201,14 +228,14 @@
       const left = t.leave - nowMin;
       if (left > 0) count = h('p', { class: 'plate-count' }, 'Осталось ' + C.duration(left));
       else if (left > -1) count = h('p', { class: 'plate-count' }, 'Пора выходить');
-      else count = h('p', { class: 'plate-count late' }, 'Время выхода прошло ' + C.duration(-left) + ' назад — поторопись');
+      else count = h('p', { class: 'plate-count late' }, 'Время выхода прошло ' + C.duration(-left) + ' назад, поторопись');
     }
     return h('div', { class: 'plate' },
       h('p', { class: 'plate-lead' }, dayLabel(t.date) + ' выходи в'),
       h('div', { class: 'plate-time' }, h('time', null, C.fmt(t.leave))),
       h('p', { class: 'plate-for' }, pairLine.replace(/^к/, 'К') + (t.first.room ? ', ауд. ' + t.first.room : '')),
       count,
-      h('div', { style: 'display:flex;gap:6px;flex-wrap:wrap' },
+      h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap' },
         t.delay.minutes ? h('span', { class: 'chip' }, '+' + t.delay.minutes + ' мин: ' + t.delay.reasons.join(', ')) : null,
         t.balls >= 3 ? h('span', { class: 'chip' }, 'пробки ' + t.balls + ' ' + (t.balls === 1 ? 'балл' : t.balls < 5 ? 'балла' : 'баллов')) : null,
         t.drone ? h('span', { class: 'chip alarm' }, 'опасность +' + t.drone + ' мин') : null,
@@ -233,7 +260,7 @@
     const d = S.settings.drone || { min: 20 };
     if (!droneActive()) {
       return h('button', { class: 'btn ghost drone-btn', type: 'button', onclick: () => setDrone(true) },
-        h('span', { 'aria-hidden': 'true' }, '⚠'), 'Объявили ракетную опасность');
+        icon('alert'), 'Объявили ракетную опасность');
     }
     const until = new Date(d.until);
     const sel = h('select', { 'aria-label': 'Запас на ракетную опасность', onchange: (e) => { S.settings.drone.min = +e.target.value; save(); scheduleNotifications(); renderHome(); } },
@@ -241,7 +268,7 @@
     return h('div', { class: 'panel drone', role: 'alert' },
       h('h2', null, 'Ракетная опасность'),
       h('p', null, 'Выход сдвинут раньше: автобусы могут встать, а мобильный интернет — пропасть. При сигнале «Ракетная опасность» уйди в укрытие и не выходи до отбоя. Маршрут и расписание уже сохранены на телефоне, напоминания из календаря сработают и без сети.'),
-      h('div', { class: 'grid2', style: 'margin-top:10px' },
+      h('div', { class: 'grid2', style: 'margin-top:12px' },
         h('label', { class: 'field' }, 'Запас по времени', sel),
         h('button', { class: 'btn', type: 'button', onclick: () => setDrone(false) }, 'Отбой')),
       h('p', { class: 'hint', style: 'margin-top:8px' }, 'Выключится сам ' + (sameDay(until, new Date()) ? 'в ' : until.toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' }) + ' в ') + C.fmt(until.getHours() * 60 + until.getMinutes()) + '. Официальные сигналы — в канале губернатора Тульской области и приложении МЧС.'));
@@ -260,7 +287,7 @@
     if (!W.forecast) {
       if (W.loading) p.append(h('p', { class: 'muted' }, 'Загружаю прогноз…'));
       else {
-        p.append(h('p', null, W.error ? 'Не удалось получить прогноз: ' + W.error + '.' : 'Прогноза пока нет.'));
+        p.append(h('p', null, W.error ? 'Не удалось получить прогноз: ' + W.error + '.' : 'Прогноза пока нет'));
         p.append(h('button', { class: 'btn ghost small', type: 'button', onclick: loadWeather }, 'Обновить прогноз'));
       }
       return p;
@@ -270,7 +297,7 @@
       h('span', { class: 'wx-temp' }, deg(cur.temp)),
       h('span', null, C.describe(cur.code) + ', ощущается ' + deg(cur.feels) + ', ветер ' + Math.round(cur.wind || 0) + ' м/с')));
     const place = (S.settings.home || S.settings.uni).name;
-    p.append(h('p', { class: 'small muted', style: 'margin:6px 0 0' }, 'Сейчас: ' + place));
+    p.append(h('p', { class: 'small muted', style: 'margin:8px 0 0' }, 'Сейчас: ' + place));
 
     let w = t && t.weather;
     if (!w) {
@@ -285,20 +312,27 @@
       const warn = C.warnings(w);
       if (warn.length) p.append(h('ul', { class: 'warn' }, warn.map((x) => h('li', null, x))));
     }
-    if (W.stale) p.append(h('p', { class: 'hint', style: 'margin-top:10px' },
+    if (W.stale) p.append(h('p', { class: 'hint', style: 'margin-top:12px' },
       'Нет связи — показан прогноз от ' + new Date(W.fetchedAt).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })));
     return p;
   }
 
   function remindPanel() {
-    const on = S.settings.notificationsOn && 'Notification' in window && Notification.permission === 'granted';
+    const tgS = S.settings.tg;
+    if (tgS.linked) {
+      return h('div', { class: 'panel' },
+        h('h2', null, 'Напоминания'),
+        h('p', { class: 'small muted', style: 'margin:0' }, 'Telegram напишет за ' + S.settings.notifyMin + ' мин до выхода и в момент выхода'));
+    }
     return h('div', { class: 'panel' },
       h('h2', null, 'Напоминания'),
-      h('p', { class: 'small muted' }, 'Календарь напомнит за ' + S.settings.notifyMin + ' мин до выхода, даже если сайт закрыт.'),
+      h('p', { class: 'small muted' }, botUrl()
+        ? 'Бот в Telegram или календарь напомнят за ' + S.settings.notifyMin + ' мин до выхода, даже когда приложение закрыто'
+        : 'Календарь напомнит за ' + S.settings.notifyMin + ' мин до выхода, даже когда приложение закрыто'),
       h('div', { class: 'btn-row' },
-        h('button', { class: 'btn', type: 'button', onclick: () => openGoogleCal() }, 'В Google Календарь'),
-        h('button', { class: 'btn ghost', type: 'button', onclick: exportICS }, 'Вся неделя в календарь'),
-        on ? null : h('button', { class: 'btn ghost', type: 'button', onclick: enableNotifications }, 'Включить уведомления')));
+        botUrl() ? h('button', { class: 'btn', type: 'button', onclick: botLink }, 'Напоминать в Telegram') : null,
+        h('button', { class: botUrl() ? 'btn ghost' : 'btn', type: 'button', onclick: () => openGoogleCal() }, 'В Google Календарь'),
+        h('button', { class: 'btn ghost', type: 'button', onclick: exportICS }, 'Неделя в календарь')));
   }
 
   function weekPanel(trips) {
@@ -346,6 +380,7 @@
     try {
       const r = await A.tulsuSchedule(g, S.settings.proxy);
       S.tulsu = { group: g, field: r.field, from: r.from, to: r.to, lessons: r.lessons, fetchedAt: Date.now() };
+      semesterFromTulsu();
       save();
       if (!silent) toast('Загружено занятий: ' + r.lessons.length + (r.cachedAt ? ' (копия от ' + new Date(r.cachedAt).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) + ')' : ''));
       scheduleNotifications();
@@ -370,7 +405,7 @@
         h('button', { class: 'btn small', type: 'button', disabled: tulsuBusy, onclick: () => loadTulsu(input.value) }, tulsuBusy ? 'Загрузка…' : t ? 'Обновить' : 'Загрузить')),
       t ? h('p', { class: 'small', style: 'margin:0' }, 'Группа ', h('b', null, t.group), ' — занятий в семестре: ' + t.lessons.length + ' (' + fmtD(t.from) + '–' + fmtD(t.to) + '). Обновлено ' +
         new Date(t.fetchedAt).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) + '.') : null,
-      t && t.error ? h('p', { class: 'hint' }, 'Не удалось обновить: ' + t.error + '. Используется сохранённая копия.') : null,
+      t && t.error ? h('p', { class: 'hint' }, 'Не удалось обновить: ' + t.error + '. Показываю сохранённую копию') : null,
       t ? h('button', { class: 'btn ghost small', type: 'button', onclick: () => {
         if (confirm('Убрать расписание группы ' + t.group + ' с этого устройства?')) { S.tulsu = null; save(); renderPairs(); scheduleNotifications(); }
       } }, 'Убрать расписание группы') : null);
@@ -390,27 +425,28 @@
   let weekOffset = 0, addFor = null; // addFor: { day, week } — быстрое добавление своей пары в день
   function twoWeeks() {
     const now = new Date(), st = S.settings;
-    const mon0 = C.addDays(now, -C.dayIndex(now));
+    // в воскресенье «эта неделя» уже прошла, поэтому показываем с завтрашнего понедельника
+    const mon0 = C.dayIndex(now) === 6 ? C.addDays(now, 1) : C.addDays(now, -C.dayIndex(now));
     const weeks = [0, 1].map((k) => { const m = C.addDays(mon0, 7 * k); return { k, mon: m, par: C.weekParity(m, st.semesterStart) }; });
     const w = weeks[weekOffset];
     const fmtD = (d) => d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'numeric' });
     const box = h('div', { class: 'panel day' },
       h('h2', null, 'Расписание на две недели'),
       h('div', { class: 'seg', role: 'group', 'aria-label': 'Неделя' }, weeks.map((x) => h('button', { type: 'button', 'aria-pressed': String(x.k === weekOffset), onclick: () => { weekOffset = x.k; menuFor = null; renderPairs(); } },
-        PAR_RU[x.par][0].toUpperCase() + PAR_RU[x.par].slice(1) + (x.k ? ' · след.' : ' · эта')))),
-      h('p', { class: 'hint', style: 'margin-top:8px' }, fmtD(w.mon) + '–' + fmtD(C.addDays(w.mon, 5)) + ', ' + PAR_RU[w.par] + ' неделя. Нечётные и чётные недели чередуются: настрой обе — и расписание будет верным весь семестр. Не твоя пара — ×, своя — «+ своя пара».'));
+        PAR_RU[x.par][0].toUpperCase() + PAR_RU[x.par].slice(1) + (x.k ? ' · след.' : C.dayIndex(now) === 6 ? ' · с завтра' : ' · эта')))),
+      h('p', { class: 'hint', style: 'margin-top:8px' }, fmtD(w.mon) + '–' + fmtD(C.addDays(w.mon, 5)) + ', ' + PAR_RU[w.par] + ' неделя. Нечётные и чётные недели чередуются: настрой обе — и расписание будет верным весь семестр. Чужую пару (другая подгруппа, физра) скрой кнопкой справа, свою добавь через «Своя пара»'));
     for (let di = 0; di < 6; di++) {
       const d = C.addDays(w.mon, di), past = C.ymd(d) < C.ymd(now);
       const list = C.classesFor(d, allLessons(), st);
       const head = h('h3', { style: 'margin-top:12px' + (past ? ';opacity:.55' : '') }, C.DAYS[di] + ', ' + d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }),
-        h('button', { class: 'btn ghost small', type: 'button', style: 'min-height:30px;padding:2px 10px', onclick: () => { addFor = addFor && addFor.day === di ? null : { day: di, week: 'all', par: w.par }; renderPairs(); } }, '+ своя пара'));
+        h('button', { class: 'btn ghost small', type: 'button', style: 'min-height:32px;padding:4px 12px', onclick: () => { addFor = addFor && addFor.day === di ? null : { day: di, week: 'all', par: w.par }; renderPairs(); } }, icon('plus'), 'Своя пара'));
       box.append(head);
       if (addFor && addFor.day === di) box.append(quickAdd(di, w.par));
       if (!list.length) { box.append(h('p', { class: 'small muted', style: 'margin:0 0 4px' }, 'Пар нет')); continue; }
       box.append(h('ul', { class: 'classes', style: past ? 'opacity:.55' : '' }, list.map((c) => lessonRow(c, d, w.par))));
     }
     if (S.hidden.length) {
-      box.append(h('details', { style: 'margin-top:12px' }, h('summary', { class: 'small', style: 'cursor:pointer;font-weight:700' }, 'Скрытые занятия: ' + S.hidden.length),
+      box.append(h('details', { style: 'margin-top:12px' }, h('summary', { class: 'small', style: 'cursor:pointer;font-weight:500' }, 'Скрытые занятия: ' + S.hidden.length),
         h('ul', { class: 'week' }, S.hidden.map((x) => h('li', null,
           h('span', { class: 'small' }, x.subject + ' — ' + (x.kind === 'weekly' ? (x.parity ? 'по ' + (x.parity === 'odd' ? 'нечётным' : 'чётным') + ' неделям, ' : 'каждую неделю, ') + C.DAYS_SHORT[x.day] + ' ' + C.fmt(x.start)
             : x.kind === 'once' ? x.date.split('-').reverse().join('.') + ' в ' + C.fmt(x.start) : 'у ' + x.teacher)),
@@ -447,7 +483,7 @@
       h('div', null,
         h('div', { class: 'cls-name' }, c.subject, own ? h('span', { class: 'badge' }, c.week && c.week !== 'all' ? 'своё · ' + PAR_RU[c.week] : 'своё') : null, c.note ? h('span', { class: 'badge' }, c.note) : null),
         h('div', { class: 'cls-meta' }, C.fmt(c.start) + '–' + C.fmt(c.end) + (c.room ? ', ауд. ' + c.room : '') + (c.teacher ? ' · ' + c.teacher : ''))),
-      h('button', { class: 'icon-btn', type: 'button', title: own ? 'Удалить' : 'Скрыть', 'aria-label': (own ? 'Удалить: ' : 'Скрыть: ') + c.subject, onclick: () => { menuFor = key; renderPairs(); } }, '×'));
+      h('button', { class: 'icon-btn', type: 'button', title: own ? 'Удалить' : 'Скрыть', 'aria-label': (own ? 'Удалить: ' : 'Скрыть: ') + c.subject, onclick: () => { menuFor = key; renderPairs(); } }, icon(own ? 'x' : 'eyeOff')));
   }
   function quickAdd(di, par) {
     const st = { pair: 1, week: 'all' };
@@ -457,7 +493,7 @@
     const wk = h('select', { 'aria-label': 'Какие недели', onchange: (e) => { st.week = e.target.value; } },
       [['all', 'Каждую неделю'], [par, 'Только ' + PAR_PL[par] + ' (как эта)'], [par === 'odd' ? 'even' : 'odd', 'Только ' + PAR_PL[par === 'odd' ? 'even' : 'odd']]].map((o) => h('option', { value: o[0] }, o[1])));
     setTimeout(() => subj.focus(), 0);
-    return h('form', { class: 'form', style: 'margin:6px 0 10px;padding:12px;border:1.5px dashed var(--line);border-radius:10px', onsubmit: (e) => {
+    return h('form', { class: 'form', style: 'margin:8px 0 12px;padding:12px;border:1px dashed var(--line-strong);border-radius:12px', onsubmit: (e) => {
       e.preventDefault();
       const name = subj.value.trim(); if (!name) { toast('Впиши название'); subj.focus(); return; }
       S.schedule.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), day: di, pair: st.pair, subject: name, room: room.value.trim(), week: st.week });
@@ -474,7 +510,7 @@
     if (allLessons().length || S.hidden.length) root.append(twoWeeks());
     if (!allLessons().length) root.append(h('div', { class: 'panel' },
       h('h2', null, 'Сейчас ' + (par === 'odd' ? 'нечётная' : 'чётная') + ' неделя'),
-      h('p', { class: 'small muted', style: 'margin:0' }, n + '-я неделя семестра. ' + (S.tulsu ? 'Ниже можно добавить свои занятия вручную — например, секцию или курсы.' : 'Если группы нет на сайте ТулГУ, добавь пары вручную.'))));
+      h('p', { class: 'small muted', style: 'margin:0' }, n + '-я неделя семестра. ' + (S.tulsu ? 'Ниже можно добавить свои занятия вручную — например, секцию или курсы.' : 'Если группы нет на сайте ТулГУ, добавь пары вручную'))));
 
     const f = { day: Math.min(C.dayIndex(new Date()), 5), pair: 1, week: 'all' };
     const subj = h('input', { type: 'text', placeholder: 'Например, Математический анализ', maxlength: 80, autocomplete: 'off' });
@@ -485,7 +521,7 @@
       S.settings.pairTimes.map((p, i) => h('option', { value: i + 1 }, (i + 1) + ' пара, ' + p[0] + '–' + p[1])));
     const weekSel = h('select', { onchange: (e) => { f.week = e.target.value; } },
       ['all', 'odd', 'even'].map((k) => h('option', { value: k }, WEEK_NAME[k][0].toUpperCase() + WEEK_NAME[k].slice(1))));
-    const formWrap = allLessons().length ? h('details', { class: 'panel' }, h('summary', { style: 'cursor:pointer;font-weight:700' }, 'Добавить пару через форму')) : null;
+    const formWrap = allLessons().length ? h('details', { class: 'panel' }, h('summary', { style: 'cursor:pointer;font-weight:500' }, 'Добавить пару через форму')) : null;
     (formWrap || root).append(h('form', {
       class: formWrap ? 'form' : 'panel form', style: formWrap ? 'margin-top:12px' : null,
       onsubmit: (e) => {
@@ -505,7 +541,7 @@
 
     if (!S.schedule.length && !S.tulsu) {
       root.append(h('div', { class: 'panel' },
-        h('p', null, 'Расписание пустое. Можно заполнить примером и потом поправить под себя.'),
+        h('p', null, 'Расписание пустое. Можно заполнить примером и поправить под себя'),
         h('button', { class: 'btn ghost', type: 'button', onclick: () => {
           S.schedule = SAMPLE.map((x, i) => Object.assign({ id: 's' + i }, x)); save(); renderPairs(); toast('Пример добавлен');
         } }, 'Заполнить примером')));
@@ -520,7 +556,7 @@
     const st = S.settings;
     const prof = (st.jams || C.DEFAULT_JAMS)[jamKind];
     const kinds = [['weekday', 'Будни'], ['saturday', 'Суббота'], ['sunday', 'Воскресенье']];
-    const color = (b) => (b >= 7 ? '#C8402A' : b >= 4 ? '#E0A21B' : '#3E9B66');
+    const color = (b) => (b >= 7 ? 'var(--jam-high)' : b >= 4 ? 'var(--jam-mid)' : 'var(--jam-low)');
     const bars = h('div', { class: 'jams', role: 'group', 'aria-label': 'Пробки по получасам' });
     for (let s = 12; s <= 43; s++) {
       const b = prof[s];
@@ -539,8 +575,8 @@
       h('div', { class: 'seg', style: 'grid-template-columns:repeat(3,1fr)' }, kinds.map((k) => h('button', { type: 'button', 'aria-pressed': String(k[0] === jamKind), onclick: () => { jamKind = k[0]; renderRoad(); } }, k[1]))),
       bars,
       h('div', { class: 'jam-axis small muted' }, ['6:00', '9:00', '12:00', '15:00', '18:00', '21:00'].map((x) => h('span', null, x))),
-      h('div', { style: 'display:flex;gap:10px;align-items:center' },
-        h('b', { style: 'min-width:150px' }, C.fmt(jamSel * 30) + '–' + C.fmt(jamSel * 30 + 30) + ': ' + prof[jamSel] + ' б.'),
+      h('div', { style: 'display:flex;gap:8px;align-items:center' },
+        h('b', { style: 'min-width:152px' }, C.fmt(jamSel * 30) + '–' + C.fmt(jamSel * 30 + 30) + ': ' + prof[jamSel] + ' б.'),
         h('button', { class: 'btn ghost small', type: 'button', 'aria-label': 'Меньше пробок', onclick: () => change(-1) }, '−'),
         h('button', { class: 'btn ghost small', type: 'button', 'aria-label': 'Больше пробок', onclick: () => change(1) }, '+'),
         st.jams ? h('button', { class: 'btn ghost small', type: 'button', onclick: () => { st.jams = null; save(); renderRoad(); scheduleNotifications(); } }, 'Сбросить') : null));
@@ -616,13 +652,13 @@
       h('button', { class: 'icon-btn', type: 'button', title: 'Переименовать', 'aria-label': 'Переименовать: ' + pl.label, onclick: () => {
         const v = prompt('Как подписать адрес?', pl.label);
         if (v && v.trim()) { pl.label = v.trim().slice(0, 30); if (pl.id === st.placeId) st.originLabel = pl.label; save(); renderRoad(); }
-      } }, '✎'),
+      } }, icon('pencil')),
       h('button', { class: 'icon-btn', type: 'button', title: 'Удалить', 'aria-label': 'Удалить: ' + pl.label, onclick: () => {
         if (!confirm('Удалить адрес «' + pl.label + '»?')) return;
         st.places = st.places.filter((x) => x !== pl);
         if (st.placeId === pl.id) { if (st.places[0]) selectPlace(st.places[0].id, true); else { st.placeId = null; st.home = null; } }
         save(); renderRoad(); scheduleNotifications();
-      } }, '×')))));
+      } }, icon('x'))))));
 
     // добавить адрес
     const used = st.places.map((x) => x.label);
@@ -646,8 +682,8 @@
     }
     q.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); search(); } });
     box.append(h('details', { open: !st.places.length },
-      h('summary', { class: 'btn ghost small', style: 'list-style:none' }, '+ Добавить адрес'),
-      h('div', { class: 'form', style: 'margin-top:10px' },
+      h('summary', { class: 'btn ghost small', style: 'list-style:none' }, icon('plus'), 'Добавить адрес'),
+      h('div', { class: 'form', style: 'margin-top:12px' },
         lab, quick,
         h('div', { style: 'display:flex;gap:8px' }, q, h('button', { class: 'btn small', type: 'button', onclick: search }, 'Найти')),
         results,
@@ -732,7 +768,8 @@
       } finally { routesBusy = false; if (tab === 'home') renderHome(); scheduleNotifications(); }
       return;
     }
-    if (st.bus.auto === false || st.bus.network) return;
+    if (st.bus.auto === false) return;
+    if (st.bus.network) { refineWalks(usedBuildings()); return; }
     await loadTransit();
   }
   // маршруты транспорта от дома — один раз на адрес, потом из памяти
@@ -747,15 +784,58 @@
       Object.keys(C.BUILDINGS).forEach((k) => { const pl = C.transitPlan(net, st.home, C.BUILDINGS[k]); if (pl) st.bus.plans[k] = pl; });
       st.bus.network = { at: net.at, routes: net.routes.length }; // сами маршруты не храним — хватает готовых планов
       stashCache();
-      transitStatus = net.routes.length ? '' : 'У дома не нашлось маршрутов в OpenStreetMap — задай автобус вручную.';
+      transitStatus = net.routes.length ? '' : 'У дома не нашлось маршрутов в OpenStreetMap, задай автобус вручную';
       save();
     } catch (e) {
-      transitStatus = e.message + '. Пока используется маршрут, заданный вручную.';
+      transitStatus = e.message + '. Пока считаю по маршруту, заданному вручную';
     } finally {
       routesBusy = false;
       if (tab === 'home') renderHome(); else if (tab === 'road') renderRoad();
       scheduleNotifications();
     }
+    refineWalks(usedBuildings());
+  }
+  const usedBuildings = () => [...new Set(C.upcomingTrips(new Date(), allLessons(), S.settings, null, 8).map((t) => t.building && t.building.key).filter(Boolean))];
+
+  // У каждого найденного маршрута свой интервал: у «Троллейбуса № 8» и «Автобуса № 16» он разный
+  function routeIntervals(b, used) {
+    const labels = [...new Set(used.map((k) => b.plans && b.plans[k]).filter((p) => p && p.type !== 'walk').map((p) => p.label))];
+    if (!labels.length) return null;
+    b.perRoute = b.perRoute || {};
+    const re = () => { save(); scheduleNotifications(); };
+    const own = (lb) => b.perRoute[lb] || (b.perRoute[lb] = { first: b.first, last: b.last, every: b.every });
+    return h('div', { class: 'form', style: 'margin-top:8px' },
+      h('h3', null, 'Интервал по маршрутам'),
+      h('p', { class: 'hint' }, 'Посмотри на остановке или в «Яндекс Картах», как часто ходит каждый. Пока не поменяешь, берётся общий интервал ниже'),
+      labels.map((lb) => {
+        const r = b.perRoute[lb] || { first: b.first, last: b.last, every: b.every };
+        return h('div', { class: 'route-int' },
+          h('div', { class: 'route-int-name' }, lb, b.perRoute[lb] ? h('button', { class: 'linkish', type: 'button', onclick: () => { delete b.perRoute[lb]; re(); renderRoad(); } }, 'как общий') : null),
+          h('div', { class: 'grid3' },
+            field('Первый', h('input', { type: 'time', value: r.first, onchange: (e) => { own(lb).first = e.target.value; re(); renderRoad(); } })),
+            field('Последний', h('input', { type: 'time', value: r.last, onchange: (e) => { own(lb).last = e.target.value; re(); renderRoad(); } })),
+            field('Каждые, мин', h('input', { type: 'number', inputmode: 'numeric', min: 1, max: 120, value: r.every, onchange: (e) => { own(lb).every = Math.min(120, Math.max(1, num(e.target.value, r.every))); re(); renderRoad(); } }))));
+      }));
+  }
+
+  // Пеший путь до остановки и от остановки до корпуса — по настоящим тротуарам, а не по прямой.
+  // Только для корпусов, где есть пары, по одному запросу за раз: сервис бесплатный
+  let walksBusy = false, walksFailed = false;
+  async function refineWalks(keys) {
+    const st = S.settings, plans = st.bus.plans || {}, home = st.home;
+    if (walksBusy || walksFailed || !home) return;
+    walksBusy = true;
+    let changed = false;
+    try { for (const k of keys) {
+      const p = plans[k];
+      if (!p || p.type === 'walk' || p.walkExact || !p.fromPt || !p.toPt) continue;
+      try {
+        const a = await A.walkRoute(home, p.fromPt), b = await A.walkRoute(p.toPt, C.BUILDINGS[k]);
+        p.walkTo = a.minutes; p.walkFrom = b.minutes; p.total = p.walkTo + p.ride + p.walkFrom; p.walkExact = true;
+        changed = true;
+      } catch (e) { walksFailed = true; break; } // сервис недоступен: до перезапуска остаются оценки по прямой
+    } } finally { walksBusy = false; }
+    if (changed) { stashCache(); save(); if (tab === 'home') renderHome(); else if (tab === 'road') renderRoad(); scheduleNotifications(); }
   }
 
   async function calcRoute(silent) {
@@ -768,7 +848,7 @@
       if (tab === 'road') renderRoad();
       scheduleNotifications();
     } catch (e) {
-      if (!silent) toast('Маршрут не посчитался: ' + e.message + '. Будет использовано время вручную.');
+      if (!silent) toast('Маршрут не посчитался: ' + e.message + '. Считаю по времени, заданному вручную');
     }
   }
 
@@ -785,7 +865,7 @@
       placesPanel(),
       placePicker('Остановка у вуза', 'uni', st.uni),
       h('p', { class: 'hint' }, 'Корпус определяется сам по аудитории из расписания (Гл.-403 → главный корпус, 9-306 → корпус 9). Маршрут на машине строится до нужного корпуса, на автобусе добавляется путь пешком от остановки до корпуса.'),
-      field('Прийти заранее, мин', numInput(st, 'earlyMin', 0, 60, scheduleNotifications), 'Чтобы спокойно раздеться и найти аудиторию.'),
+      field('Прийти заранее, мин', numInput(st, 'earlyMin', 0, 60, scheduleNotifications), 'Чтобы спокойно раздеться и найти аудиторию'),
       field('Погрешность расчёта', h('select', { onchange: (e) => { st.errorPct = +e.target.value; save(); scheduleNotifications(); } },
         [[0, 'Без запаса — впритык'], [10, '+10 % к дороге — обычно'], [20, '+20 % — с запасом'], [30, '+30 % — точно не опоздать']].map((o) => h('option', { value: o[0], selected: +st.errorPct === o[0] }, o[1]))),
         'Расчёт приблизительный: пробки, задержки транспорта, светофоры. Запас добавляется к времени в пути.')));
@@ -797,25 +877,26 @@
       const used = [...new Set(C.upcomingTrips(new Date(), allLessons(), st, null, 8).map((t) => t.building && t.building.key).filter(Boolean))];
       root.append(h('div', { class: 'panel form' },
         h('h2', null, 'Маршрут сам'),
-        h('label', { style: 'display:flex;gap:10px;align-items:center;font-weight:600' },
+        h('label', { style: 'display:flex;gap:12px;align-items:center;font-weight:500' },
           h('input', { type: 'checkbox', checked: b.auto !== false, onchange: (e) => { b.auto = e.target.checked; save(); renderRoad(); scheduleNotifications(); if (b.auto) ensureRoutes([]); } }),
           'Подбирать транспорт до корпуса автоматически'),
         h('p', { class: 'hint' }, 'Остановки и маршруты автобусов, троллейбусов и трамваев берутся из OpenStreetMap. Расписания там нет, поэтому интервал задаётся ниже.'),
         transitStatus ? h('p', { class: 'small' }, transitStatus) : null,
-        b.auto !== false && !st.home ? h('p', { class: 'small' }, 'Укажи адрес дома выше — и маршруты найдутся сами.') : null,
+        b.auto !== false && !st.home ? h('p', { class: 'small' }, 'Укажи адрес дома выше, и маршруты найдутся сами') : null,
         b.auto !== false && b.network ? h('ul', { class: 'week' }, (used.length ? used : ['Гл']).map((k) => {
           const pl = plans[k], bd = C.BUILDINGS[k];
           return h('li', null, h('span', null, bd.name),
             pl ? h('span', null, h('b', null, pl.label), pl.type === 'walk' ? ' — ' + pl.ride + ' мин' : ': «' + pl.from + '» → «' + pl.to + '», ' + (pl.walkTo + pl.ride + pl.walkFrom) + ' мин')
               : h('span', { class: 'muted' }, 'прямого маршрута нет — вручную'));
         })) : null,
-        b.auto !== false && b.network ? h('button', { class: 'btn ghost small', type: 'button', disabled: routesBusy, onclick: () => { b.network = null; loadTransit(); } }, 'Пересчитать маршруты') : null));
+        b.auto !== false && b.network ? h('button', { class: 'btn ghost small', type: 'button', disabled: routesBusy, onclick: () => { b.network = null; loadTransit(); } }, 'Пересчитать маршруты') : null,
+        b.auto !== false && b.network ? routeIntervals(b, used) : null));
       if (b.auto !== false && st.home && !b.network && !routesBusy) loadTransit();
       const times = h('textarea', { placeholder: '6:40 6:55 7:10 7:25 7:40', value: b.times, onchange: (e) => { b.times = e.target.value; save(); re(); } });
       const parsedCount = C.busDepartures(b).length;
       root.append(h('div', { class: 'panel form' },
         h('h2', null, b.auto !== false ? 'Интервал и ручной маршрут' : 'Автобус'),
-        b.auto !== false ? h('p', { class: 'hint' }, 'Интервал движения используется всегда. Остальные поля — запасной вариант, если до корпуса не нашлось прямого маршрута.') : null,
+        b.auto !== false ? h('p', { class: 'hint' }, 'Общий интервал берётся для маршрутов, у которых выше не задан свой. Остальные поля нужны, если до корпуса не нашлось прямого маршрута') : null,
         field('Номер маршрута', h('input', { type: 'text', value: b.number, maxlength: 20, placeholder: '16', onchange: (e) => { b.number = e.target.value.trim(); save(); } })),
         h('div', { class: 'grid2' },
           field('Идти до остановки, мин', numInput(b, 'walkTo', 0, 60, re)),
@@ -837,14 +918,14 @@
       root.append(h('div', { class: 'panel form' },
         h('h2', null, 'Машина'),
         h('p', { style: 'margin:0' }, c.routeMin
-          ? 'По маршруту ' + String(c.routeKm).replace('.', ',') + ' км, около ' + c.routeMin + ' мин без пробок.'
-          : 'Маршрут не рассчитан — используется время вручную.'),
+          ? 'По маршруту ' + String(c.routeKm).replace('.', ',') + ' км, около ' + c.routeMin + ' мин без пробок'
+          : 'Маршрут не рассчитан, считаю по времени вручную'),
         h('button', { class: 'btn ghost small', type: 'button', onclick: () => calcRoute(false) }, 'Рассчитать маршрут по карте'),
-        field('Время без пробок вручную, мин', numInput(c, 'manualMin', 1, 180, re), 'Используется, если маршрут не рассчитан.'),
+        field('Время без пробок вручную, мин', numInput(c, 'manualMin', 1, 180, re), 'Нужно, если маршрут по карте не посчитался'),
         field('Пробки', h('select', { onchange: (e) => { c.traffic = e.target.value === 'auto' ? 'auto' : +e.target.value; save(); renderRoad(); re(); } },
           [['auto', 'Сам — по времени суток и дню недели'], [1, 'Всегда свободно'], [1.3, 'Всегда средние'], [1.6, 'Всегда сильные']].map((o) => h('option', { value: o[0], selected: String(c.traffic) === String(o[0]) }, o[1]))),
           c.traffic === 'auto' ? 'Пробки по часам — ниже: в будни пик в 7:30 (9 баллов — дорога почти вдвое дольше), в 9:00 ещё 5, днём 3–4, в 17:30 снова 9, в субботу 1–3. Автобусы тоже стоят в пробках, трамвай почти нет.' : null),
-        h('label', { style: 'display:flex;gap:10px;align-items:center;font-weight:600' },
+        h('label', { style: 'display:flex;gap:12px;align-items:center;font-weight:500' },
           h('input', { type: 'checkbox', checked: c.parkingAuto !== false, onchange: (e) => { c.parkingAuto = e.target.checked; save(); renderRoad(); re(); } }),
           'Время на парковку считать самому'),
         c.parkingAuto !== false
@@ -862,26 +943,46 @@
     const supported = 'Notification' in window;
     const granted = supported && Notification.permission === 'granted';
 
+    const tgS = st.tg;
+    const ago = (ms) => { const m = Math.round((Date.now() - ms) / 60000); return m < 1 ? 'только что' : m < 60 ? m + ' мин назад' : new Date(ms).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); };
     root.append(h('div', { class: 'panel form' },
-      h('h2', null, 'Уведомления'),
+      h('h2', null, 'Напоминания'),
       field('Напомнить до выхода, мин', numInput(st, 'notifyMin', 1, 60, scheduleNotifications)),
-      h('p', { class: 'hint' }, !supported ? 'Этот браузер не поддерживает уведомления — используй календарь.'
-        : st.notificationsOn && granted ? 'Уведомления включены. Они приходят, пока сайт или приложение открыто в фоне.'
-          : Notification.permission === 'denied' ? 'Уведомления запрещены в настройках браузера.' : 'Уведомления выключены.'),
+
+      h('h3', null, 'Telegram'),
+      tgS.linked
+        ? h('p', { class: 'hint' }, 'Подключено. Бот напишет за ' + st.notifyMin + ' мин и в момент выхода, даже если приложение закрыто. ' +
+          (tgS.syncedAt ? 'Время отправлено ' + ago(tgS.syncedAt) + '. ' : '') + 'Если поменялась погода или пары, открой приложение, и время обновится')
+        : h('p', { class: 'hint' }, 'Самый удобный способ. Боту уходит только время выхода и название пары, без адресов'),
+      tgS.error ? h('p', { class: 'hint warn-text' }, 'Не получилось: ' + tgS.error) : null,
+      !BOT_URL ? field('Адрес бота', h('input', { type: 'url', value: tgS.url, placeholder: 'https://uspey-bot.имя.workers.dev', onchange: (e) => { tgS.url = e.target.value.trim(); botName = null; save(); renderSettings(); } }),
+        'Бот разворачивается из папки bot/ на Cloudflare, инструкция в README') : null,
       h('div', { class: 'btn-row' },
+        tgS.linked
+          ? h('button', { class: 'btn ghost', type: 'button', onclick: botUnlink }, 'Отключить')
+          : h('button', { class: 'btn', type: 'button', disabled: !botUrl(), onclick: botLink }, tgS.token ? 'Открыть бота ещё раз' : 'Напоминать в Telegram'),
+        tgS.token && !tgS.linked ? h('button', { class: 'btn ghost', type: 'button', onclick: botCheck }, 'Я нажал «Запустить»') : null),
+
+      h('h3', null, 'Календарь'),
+      h('p', { class: 'hint' }, 'Работает без интернета и без бота. Файл с поездками на неделю: открой его, и телефон добавит события с будильником. Обновляй раз в неделю или когда меняется расписание'),
+      h('button', { class: 'btn ghost', type: 'button', onclick: exportICS }, 'Скачать поездки на неделю'),
+
+      h('h3', null, 'Уведомления браузера'),
+      h('p', { class: 'hint' }, !supported ? 'Этот браузер их не поддерживает'
+        : Notification.permission === 'denied' ? 'Запрещены в настройках браузера'
+          : 'Приходят, только пока приложение открыто. Свёрнутое приложение телефон усыпляет за несколько минут, поэтому утром на них лучше не рассчитывать'),
+      supported && Notification.permission !== 'denied' ? h('div', { class: 'btn-row' },
         st.notificationsOn && granted
-          ? h('button', { class: 'btn ghost', type: 'button', onclick: () => { st.notificationsOn = false; save(); scheduleNotifications(); renderSettings(); } }, 'Выключить уведомления')
-          : h('button', { class: 'btn', type: 'button', disabled: !supported, onclick: enableNotifications }, 'Включить уведомления'),
-        granted ? h('button', { class: 'btn ghost', type: 'button', onclick: () => notify('Так будет выглядеть напоминание', 'Через ' + st.notifyMin + ' мин выходить') }, 'Проверить') : null),
-      h('h3', { style: 'margin-top:6px' }, 'Календарь'),
-      h('p', { class: 'hint' }, 'Самый надёжный способ: файл с поездками на 7 дней. Открой его — телефон добавит события с напоминаниями. Обновляй раз в неделю или после смены расписания.'),
-      h('button', { class: 'btn ghost', type: 'button', onclick: exportICS }, 'Скачать напоминания на неделю')));
+          ? h('button', { class: 'btn ghost', type: 'button', onclick: () => { st.notificationsOn = false; save(); scheduleNotifications(); renderSettings(); } }, 'Выключить')
+          : h('button', { class: 'btn ghost', type: 'button', onclick: enableNotifications }, 'Включить'),
+        granted ? h('button', { class: 'btn ghost', type: 'button', onclick: () => notify('Так выглядит напоминание', 'Через ' + st.notifyMin + ' мин выходить') }, 'Проверить') : null) : null));
 
     root.append(h('div', { class: 'panel form' },
       h('h2', null, 'Семестр и время пар'),
       field('Начало семестра', h('input', { type: 'date', value: st.semesterStart, onchange: (e) => {
-        if (C.parseDate(e.target.value)) { st.semesterStart = e.target.value; save(); scheduleNotifications(); }
-      } }), 'Первая неделя считается нечётной.'),
+        if (C.parseDate(e.target.value)) { st.semesterStart = e.target.value; st.semesterManual = true; save(); scheduleNotifications(); renderSettings(); }
+      } }), (S.tulsu && !st.semesterManual ? 'Взято из расписания ТулГУ. ' : '') + 'Первая неделя нечётная'),
+      st.semesterManual && S.tulsu ? h('button', { class: 'btn ghost small', type: 'button', onclick: () => { st.semesterManual = false; semesterFromTulsu(); save(); scheduleNotifications(); renderSettings(); } }, 'Взять из расписания ТулГУ') : null,
       h('div', { class: 'pairtimes' }, st.pairTimes.map((p, i) => [
         h('b', null, i + 1),
         h('input', { type: 'time', value: p[0], 'aria-label': (i + 1) + ' пара, начало', onchange: (e) => { if (e.target.value) { p[0] = e.target.value; save(); scheduleNotifications(); } } }),
@@ -895,7 +996,7 @@
       h('div', { class: 'btn-row' }, h('button', { class: 'btn', type: 'button', onclick: shareTransfer }, 'Перенести на другое устройство')),
       field('Свой прокси для расписания ТулГУ (необязательно)', h('input', { type: 'text', value: st.proxy, placeholder: 'https://mой-прокси.workers.dev/?url={url}', onchange: (e) => { st.proxy = e.target.value.trim(); save(); } }),
         'Сайт ТулГУ не отдаёт данные другим сайтам напрямую, поэтому расписание идёт через прокси. Без своего используется публичный.'),
-      h('p', { class: 'hint' }, 'Всё хранится только на этом устройстве, на сервер ничего не отправляется.'),
+      h('p', { class: 'hint' }, st.tg.linked ? 'Всё хранится на этом устройстве. Наружу уходит только время выхода и название пары, если подключён Telegram' : 'Всё хранится только на этом устройстве, на сервер ничего не уходит'),
       h('div', { class: 'btn-row' },
         h('button', { class: 'btn ghost', type: 'button', onclick: () => download('uspeyu-backup.json', JSON.stringify(S, null, 2), 'application/json') }, 'Сохранить копию'),
         h('label', { class: 'btn ghost' }, 'Загрузить копию', h('input', { type: 'file', accept: 'application/json,.json', hidden: true, onchange: importBackup }))),
@@ -905,7 +1006,7 @@
 
     root.append(h('div', { class: 'panel small muted' },
       h('p', null, 'Успею — проект по дисциплине «Проектная деятельность», ТулГУ. Команда: Комерилов Григорий, Кузнецов Артем, Гончаров Иннокентий, Харитонов Илья.'),
-      h('p', { style: 'margin:0' }, 'Погода — Open-Meteo, адреса — OpenStreetMap, маршрут — OSRM.')));
+      h('p', { style: 'margin:0' }, 'Погода: Open-Meteo. Адреса и остановки: OpenStreetMap. Маршруты: OSRM')));
   }
 
   // перенос настроек ссылкой: всё нужное кладём в адрес после #import=
@@ -914,12 +1015,14 @@
     return { v: 1, group: S.tulsu ? S.tulsu.group : null, schedule: S.schedule, hidden: S.hidden,
       settings: { mode: st.mode, earlyMin: st.earlyMin, errorPct: st.errorPct, notifyMin: st.notifyMin, semesterStart: st.semesterStart, pairTimes: st.pairTimes,
         jams: st.jams, uni: st.uni, places: st.places.map((x) => ({ id: x.id, label: x.label, name: x.name, lat: x.lat, lon: x.lon })), placeId: st.placeId,
-        bus: { auto: st.bus.auto, number: st.bus.number, walkTo: st.bus.walkTo, stopReserve: st.bus.stopReserve, ride: st.bus.ride, walkFrom: st.bus.walkFrom, useInterval: st.bus.useInterval, times: st.bus.times, first: st.bus.first, last: st.bus.last, every: st.bus.every },
+        bus: { auto: st.bus.auto, number: st.bus.number, walkTo: st.bus.walkTo, stopReserve: st.bus.stopReserve, ride: st.bus.ride, walkFrom: st.bus.walkFrom, useInterval: st.bus.useInterval, times: st.bus.times, first: st.bus.first, last: st.bus.last, every: st.bus.every, perRoute: st.bus.perRoute },
         car: { manualMin: st.car.manualMin, traffic: st.car.traffic, parkingAuto: st.car.parkingAuto, parking: st.car.parking } } };
   }
   const b64 = (s) => btoa(unescape(encodeURIComponent(s))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   const unb64 = (s) => decodeURIComponent(escape(atob(s.replace(/-/g, '+').replace(/_/g, '/'))));
   async function shareTransfer() {
+    const pl = S.settings.places;
+    if (pl.length && !confirm('В ссылке будут твои адреса: ' + pl.map((x) => x.label).join(', ') + '. Открой её сам на телефоне и не кидай в общие чаты: по ней видно, где ты живёшь. Продолжить?')) return;
     const url = location.origin + location.pathname + '#import=' + b64(JSON.stringify(transferData()));
     try { if (navigator.share) { await navigator.share({ title: 'Успею — мои настройки', url }); return; } } catch (e) { if (e.name === 'AbortError') return; }
     try { await navigator.clipboard.writeText(url); toast('Ссылка скопирована — открой её на телефоне'); } catch (e) { prompt('Скопируй ссылку и открой на телефоне:', url); }
@@ -999,8 +1102,60 @@
     } catch (e) { toast(title + ' — ' + body); }
   }
 
+  /* ---------- Telegram-бот: напоминания приходят, даже когда приложение закрыто ---------- */
+  const botUrl = () => (S.settings.tg.url || BOT_URL).trim();
+  let botName = null, syncTimer = null;
+  async function botLink() {
+    const tgS = S.settings.tg, base = botUrl();
+    if (!base) { toast('Сначала впиши адрес бота'); return; }
+    try {
+      if (!botName) botName = (await A.bot.info(base)).bot;
+      if (!botName) throw new Error('бот не настроен');
+    } catch (e) { toast('Бот не отвечает: ' + e.message); return; }
+    if (!tgS.token) {
+      const a = new Uint8Array(18); crypto.getRandomValues(a);
+      tgS.token = btoa(String.fromCharCode(...a)).replace(/\+/g, '-').replace(/\//g, '_');
+      save();
+    }
+    window.open('https://t.me/' + botName + '?start=' + tgS.token, '_blank', 'noopener');
+    toast('Нажми «Запустить» в Telegram и вернись сюда');
+  }
+  async function botCheck() {
+    const tgS = S.settings.tg, base = botUrl();
+    if (!base || !tgS.token) return;
+    try {
+      const r = await A.bot.status(base, tgS.token);
+      if (r.linked !== tgS.linked) { tgS.linked = !!r.linked; save(); render(); }
+      if (tgS.linked) botSync(true);
+    } catch (e) { /* нет связи — проверим в другой раз */ }
+  }
+  async function botUnlink() {
+    const tgS = S.settings.tg, base = botUrl();
+    try { if (base && tgS.token) await A.bot.unlink(base, tgS.token); } catch (e) { /* бот недоступен, всё равно забываем */ }
+    Object.assign(tgS, { token: '', linked: false, syncedAt: 0, error: '' });
+    save(); render(); toast('Telegram отключён');
+  }
+  // Отправить боту напоминания на 8 дней вперёд. Вызывается после каждого пересчёта, с задержкой,
+  // чтобы десять изменений подряд в настройках не превратились в десять запросов
+  function botSync(now) {
+    const tgS = S.settings.tg;
+    if (!tgS.linked || !botUrl()) return;
+    clearTimeout(syncTimer);
+    syncTimer = setTimeout(async () => {
+      const trips = C.upcomingTrips(new Date(), allLessons(), S.settings, W.forecast, 8);
+      try {
+        const r = await A.bot.sync(botUrl(), tgS.token, C.botReminders(trips, S.settings.notifyMin, Date.now()));
+        if (r.linked === false) { tgS.linked = false; tgS.error = 'Бот отвязан, привяжи заново'; }
+        else { tgS.syncedAt = Date.now(); tgS.error = ''; }
+      } catch (e) { tgS.error = e.message; }
+      save();
+      if (tab === 'settings') renderSettings();
+    }, now ? 0 : 4000);
+  }
+
   let timers = [];
   function scheduleNotifications() {
+    botSync();
     timers.forEach(clearTimeout);
     timers = [];
     if (!S.settings.notificationsOn || !('Notification' in window) || Notification.permission !== 'granted') return;
@@ -1009,7 +1164,7 @@
       const leaveAt = C.atMinutes(t.date, t.leave);
       const body = t.first.pair + ' пара в ' + C.fmt(t.first.start) + (t.first.subject ? ': ' + t.first.subject : '') +
         (t.mode === 'bus' && t.bus != null ? '. Автобус в ' + C.fmt(t.bus) : '');
-      [[new Date(leaveAt - S.settings.notifyMin * 60000), 'Через ' + S.settings.notifyMin + ' мин выходить'], [leaveAt, 'Пора выходить!']]
+      [[new Date(leaveAt - S.settings.notifyMin * 60000), 'Через ' + S.settings.notifyMin + ' мин выходить'], [leaveAt, 'Пора выходить']]
         .forEach(([when, title]) => {
           const ms = when - now;
           if (ms > 0 && ms < 24 * 3600 * 1000) timers.push(setTimeout(() => notify(title, body), ms));
@@ -1043,7 +1198,9 @@
   if (S.tulsu && Date.now() - S.tulsu.fetchedAt > 12 * 3600 * 1000) loadTulsu(S.tulsu.group, true);
   setInterval(() => { if (tab === 'home' && !document.hidden) renderHome(); }, 30000);
   setInterval(loadWeather, 30 * 60 * 1000);
+  botCheck();
   document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && S.settings.tg.token && !S.settings.tg.linked) botCheck(); // вернулся из Telegram после «Запустить»
     if (!document.hidden && W.fetchedAt && Date.now() - W.fetchedAt > 20 * 60 * 1000) loadWeather();
     else if (!document.hidden && tab === 'home') renderHome();
   });
