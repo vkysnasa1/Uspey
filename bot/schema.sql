@@ -4,7 +4,9 @@
 CREATE TABLE IF NOT EXISTS links (
   token   TEXT PRIMARY KEY,
   chat_id INTEGER NOT NULL,
-  created INTEGER NOT NULL
+  created INTEGER NOT NULL,
+  sync_count  INTEGER NOT NULL DEFAULT 0,  -- сколько раз приложение присылало напоминания в текущий час
+  sync_window INTEGER NOT NULL DEFAULT 0   -- когда начался этот час (мс)
 );
 CREATE INDEX IF NOT EXISTS links_chat ON links (chat_id);
 
