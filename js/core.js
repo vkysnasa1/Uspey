@@ -328,7 +328,8 @@
           const total = walkTo + ride + walkFrom;
           if (!best || total < best.total) {
             best = { type: r.type, label: (TYPE_RU[r.type] || 'Транспорт') + (r.ref ? ' № ' + r.ref : ''), ref: r.ref || '', name: r.name || '',
-              from: st[i].name || 'остановка', to: st[j].name || 'остановка', walkTo, ride, walkFrom, total, stops: j - i };
+              from: st[i].name || 'остановка', to: st[j].name || 'остановка', walkTo, ride, walkFrom, total, stops: j - i,
+              fromPt: { lat: st[i].lat, lon: st[i].lon }, toPt: { lat: st[j].lat, lon: st[j].lon } };
           }
         }
       }
@@ -395,7 +396,11 @@
   }
 
   /* ---------- когда выходить ---------- */
-  function busDepartures(bus) {
+  // Отправления: у каждого маршрута может быть свой интервал (bus.perRoute['Троллейбус № 8']),
+  // иначе берётся общий интервал или точное время из настроек
+  function busDepartures(bus, routeKey) {
+    const own = routeKey && bus.perRoute && bus.perRoute[routeKey];
+    if (own) return intervalTimes(own.first, own.last, own.every);
     return bus.useInterval ? intervalTimes(bus.first, bus.last, bus.every) : parseTimes(bus.times);
   }
 
@@ -470,7 +475,7 @@
         { t: first.start, text: aud },
       ] });
     }
-    const deps = busDepartures(bus);
+    const deps = busDepartures(bus, auto ? auto.label : null);
     if (!deps.length) return Object.assign(base, { status: 'no-bus' });
     // автобусы и троллейбусы стоят в тех же пробках (слабее — есть выделенки), трамвай почти нет
     const baseRide = auto ? auto.ride : +bus.ride || 0;
@@ -553,17 +558,32 @@
         L.push('BEGIN:VALARM', 'ACTION:DISPLAY', 'TRIGGER:-PT' + Math.round(+notifyMin) + 'M',
           'DESCRIPTION:' + icsEscape('Через ' + Math.round(+notifyMin) + ' мин выходить'), 'END:VALARM');
       }
-      L.push('BEGIN:VALARM', 'ACTION:DISPLAY', 'TRIGGER:PT0M', 'DESCRIPTION:' + icsEscape('Пора выходить!'), 'END:VALARM', 'END:VEVENT');
+      L.push('BEGIN:VALARM', 'ACTION:DISPLAY', 'TRIGGER:PT0M', 'DESCRIPTION:' + icsEscape('Пора выходить'), 'END:VALARM', 'END:VEVENT');
     });
     L.push('END:VCALENDAR');
     return L.map(icsFold).join('\r\n') + '\r\n';
+  }
+
+  /* ---------- напоминания для Telegram-бота ----------
+     На сервер уходят только готовые тексты и время: без адресов и настроек. */
+  function botReminders(trips, notifyMin, nowMs) {
+    const out = [], n = Math.round(+notifyMin) || 0;
+    trips.filter((t) => t.status === 'ok').forEach((t) => {
+      const leaveAt = atMinutes(t.date, t.leave).getTime();
+      const pair = t.first.pair + ' пара в ' + fmt(t.first.start) + (t.first.subject ? ': ' + t.first.subject : '') + (t.first.room ? ', ауд. ' + t.first.room : '');
+      const how = t.mode === 'car' ? 'На машине' : t.bus != null ? (t.auto && t.auto.label ? t.auto.label : 'Автобус') + ' в ' + fmt(t.bus) : '';
+      const extra = [t.delay && t.delay.minutes ? 'Погода: +' + t.delay.minutes + ' мин (' + t.delay.reasons.join(', ') + ')' : '', t.drone ? 'Запас на опасность: +' + t.drone + ' мин' : ''].filter(Boolean);
+      if (n > 0) out.push({ at: leaveAt - n * 60000, text: 'Через ' + n + ' мин выходить (в ' + fmt(t.leave) + ')\n' + pair + (how ? '\n' + how : '') });
+      out.push({ at: leaveAt, text: 'Пора выходить\n' + pair + '\n\n' + (t.steps || []).map((s) => fmt(s.t) + ' — ' + s.text).join('\n') + (extra.length ? '\n\n' + extra.join('\n') : '') });
+    });
+    return out.filter((r) => r.at > nowMs).sort((a, b) => a.at - b.at);
   }
 
   const Core = {
     DEFAULT_PAIRS, DAYS, DAYS_SHORT, toMin, fmt, duration, parseTimes, intervalTimes,
     parseDate, ymd, addDays, dayIndex, weekNumber, weekParity, atMinutes,
     pairTime, classesFor, parseTulsu, describe, parseForecast, commuteWeather, conditions,
-    weatherDelay, clothing, warnings, BUILDINGS, buildingOf, distanceM, walkMinutes, transitPlan, trafficFactor, jamBalls, DEFAULT_JAMS, JAM_STEP, parkingMinutes, errorMargin, learnJams, busDepartures, planTrip, upcomingTrips, droneMinutes, buildICS, icsFold,
+    weatherDelay, clothing, warnings, BUILDINGS, buildingOf, distanceM, walkMinutes, transitPlan, trafficFactor, jamBalls, DEFAULT_JAMS, JAM_STEP, parkingMinutes, errorMargin, learnJams, busDepartures, planTrip, upcomingTrips, droneMinutes, buildICS, icsFold, botReminders,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = Core;
   else root.Core = Core;

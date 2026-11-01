@@ -22,8 +22,15 @@ jobs:
           git config user.name 'vkysnasa1'
           git config user.email 'vkysnasa1@users.noreply.github.com'
           git add data/tulsu
-          git diff --cached --quiet && exit 0
-          git commit -m 'Обновлена копия расписания ТулГУ'
+          if git diff --cached --quiet; then
+            # GitHub выключает запуск по расписанию, если в репозитории 60 дней ничего не происходит
+            # (например, в каникулы расписание не меняется). Раз в 50 дней тишины — пустой коммит
+            age=$(( $(date +%s) - $(git log -1 --format=%ct) ))
+            [ "$age" -lt 4320000 ] && exit 0
+            git commit --allow-empty -m 'Расписание ТулГУ без изменений, проверка жива'
+          else
+            git commit -m 'Обновлена копия расписания ТулГУ'
+          fi
           git pull --rebase origin main
           git push origin HEAD:main
           git push -f origin HEAD:gh-pages
